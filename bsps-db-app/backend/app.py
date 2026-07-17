@@ -449,7 +449,7 @@ def get_stage_summary(stage_id: int):
     cursor.execute("SELECT id, revision_num, filename FROM invers_revisions WHERE stage_id = ? AND is_active = 1", (stage_id,))
     active_rev = cursor.fetchone()
     
-    cursor.execute("SELECT id, name, uploaded_at FROM verified_batches WHERE stage_id = ? ORDER BY uploaded_at ASC", (stage_id,))
+    cursor.execute("SELECT id, name, uploaded_at, is_published FROM verified_batches WHERE stage_id = ? ORDER BY uploaded_at ASC", (stage_id,))
     batches = [dict(row) for row in cursor.fetchall()]
     
     lolos_total = 0
@@ -617,6 +617,28 @@ def delete_verified_batch(batch_id: int):
         raise HTTPException(status_code=500, detail=f"Gagal menghapus batch: {str(e)}")
     conn.close()
     return {"message": f"Berita Acara {batch_id} berhasil dihapus. {deleted_overrides} hasil rekonsiliasi terkait ikut terhapus."}
+
+@app.post("/api/verified/batch/{batch_id}/toggle-published")
+def toggle_batch_published(batch_id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT id, is_published FROM verified_batches WHERE id = ?", (batch_id,))
+        batch = cursor.fetchone()
+        if not batch:
+            raise HTTPException(status_code=404, detail="Batch tidak ditemukan")
+        
+        new_status = 0 if batch['is_published'] else 1
+        cursor.execute("UPDATE verified_batches SET is_published = ? WHERE id = ?", (new_status, batch_id))
+        conn.commit()
+    except HTTPException:
+        conn.close()
+        raise
+    except Exception as e:
+        conn.close()
+        raise HTTPException(status_code=500, detail=f"Gagal mengubah status: {str(e)}")
+    conn.close()
+    return {"batch_id": batch_id, "is_published": new_status}
 
 @app.get("/api/stage/{stage_id}/records")
 def get_stage_records(stage_id: int):
@@ -1940,6 +1962,39 @@ def export_pengusul_tree(stage_id: int):
     )
 
 
+@app.get("/api/stage/{stage_id}/kabupaten-pengusul-tree")
+def get_kabupaten_pengusul_tree(stage_id: int):
+    """Ambil data rekap per kabupaten dengan children berupa daftar pengusul."""
+    tree_data = get_pengusul_tree(stage_id)
+
+    kab_map = {}
+    for pengusul in tree_data:
+        p_name = pengusul['name']
+        for kab in pengusul.get('children', []):
+            kb_name = kab['name']
+            if kb_name not in kab_map:
+                kab_map[kb_name] = {
+                    "name": kb_name,
+                    "cpb": 0, "lolos": 0, "tidak_lolos": 0, "belum_verifikasi": 0,
+                    "children": []
+                }
+            node = kab_map[kb_name]
+            node["cpb"] += kab['cpb']
+            node["lolos"] += kab['lolos']
+            node["tidak_lolos"] += kab['tidak_lolos']
+            node["belum_verifikasi"] += kab['belum_verifikasi']
+            node["children"].append({
+                "name": p_name,
+                "cpb": kab['cpb'],
+                "lolos": kab['lolos'],
+                "tidak_lolos": kab['tidak_lolos'],
+                "belum_verifikasi": kab['belum_verifikasi']
+            })
+
+    result = sorted(kab_map.values(), key=lambda x: x['name'])
+    return result
+
+
 # --- END OF NEW ENDPOINTS ---
 
 # --- REKAP KESELURUHAN (All stages, per kabupaten) ---
@@ -2245,7 +2300,7 @@ def export_rekap_keseluruhan():
 
 # --- REKAP KESELURUHAN (All stages, per kabupaten) ---
 @app.get("/api/rekap-keseluruhan")
-def get_rekap_keseluruhan():
+def get_rekap_keseluruhan(published_only: int = 0):
     import re
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -2258,8 +2313,11 @@ def get_rekap_keseluruhan():
         return int(match.group()) if match else 999
     all_stages = sorted(all_stages, key=get_stage_num)
     
+    # Build optional published-only filter for verified queries
+    published_filter = "AND vb.is_published = 1" if published_only else ""
+    
     # Get the full list of unique kabupaten across all stages
-    cursor.execute("""
+    cursor.execute(f"""
         SELECT DISTINCT UPPER(TRIM(COALESCE(kabupaten_kota, ''))) as kab 
         FROM invers_records ir
         JOIN invers_revisions irv ON ir.revision_id = irv.id
@@ -2270,6 +2328,7 @@ def get_rekap_keseluruhan():
         JOIN verified_batches vb ON vr.batch_id = vb.id
         LEFT JOIN reconciliation_overrides ro ON ro.original_no_ktp = vr.no_ktp AND ro.stage_id = vb.stage_id
         WHERE (vr.is_duplicate_in_previous = 0 OR ro.id IS NOT NULL) AND TRIM(COALESCE(vr.kabupaten_kota, '')) != ''
+        {published_filter}
         ORDER BY kab ASC
     """)
     all_kabupaten = [r['kab'] for r in cursor.fetchall()]
@@ -2290,13 +2349,14 @@ def get_rekap_keseluruhan():
         invers_recs = [dict(r) for r in cursor.fetchall()]
         
         # Get verified records for this stage (non-duplicate OR reconciled)
-        cursor.execute("""
+        cursor.execute(f"""
             SELECT vr.no_ktp, vr.status, UPPER(TRIM(COALESCE(vr.kabupaten_kota, ''))) as kab,
                    vr.is_duplicate_in_previous
             FROM verified_records vr
             JOIN verified_batches vb ON vr.batch_id = vb.id
             LEFT JOIN reconciliation_overrides ro ON ro.original_no_ktp = vr.no_ktp AND ro.stage_id = vb.stage_id
             WHERE vb.stage_id = ? AND (vr.is_duplicate_in_previous = 0 OR ro.id IS NOT NULL)
+            {published_filter}
         """, (stage_id,))
         verified_recs = [dict(r) for r in cursor.fetchall()]
         

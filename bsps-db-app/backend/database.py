@@ -65,9 +65,16 @@ def init_db():
         stage_id INTEGER,
         name TEXT,
         uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        is_published INTEGER DEFAULT 0,
         FOREIGN KEY(stage_id) REFERENCES invers_stages(id) ON DELETE CASCADE
     )
     """)
+    
+    # Migration: add is_published to existing verified_batches if missing
+    try:
+        cursor.execute("SELECT is_published FROM verified_batches LIMIT 1")
+    except Exception:
+        cursor.execute("ALTER TABLE verified_batches ADD COLUMN is_published INTEGER DEFAULT 0")
     
     # 5. Verified Records
     cursor.execute("""

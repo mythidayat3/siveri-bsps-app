@@ -48,6 +48,84 @@ const IconHelp = () => (
   </svg>
 );
 
+// Expandable Kabupaten Row for "Rekap Per Kabupaten" tab
+function KabupatenPengusulRow({ kab }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
+      <div 
+        className={`tree-row ${isExpanded ? 'active-row' : ''}`}
+        style={{ 
+          display: 'grid',
+          gridTemplateColumns: 'minmax(200px, 2fr) repeat(5, 90px)',
+          alignItems: 'center',
+          padding: '12px 14px',
+          borderBottom: '1px solid #e9ecef',
+          cursor: 'pointer'
+        }}
+        onClick={() => setIsExpanded(!isExpanded)}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span 
+            className={`tree-arrow ${isExpanded ? 'expanded' : ''}`}
+            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px' }}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+          </span>
+          <span style={{ fontWeight: '700', fontSize: '0.9rem' }}>{kab.name}</span>
+        </div>
+        <div style={{ textAlign: 'center', fontWeight: '600', fontSize: '0.85rem' }}>{kab.cpb}</div>
+        <div style={{ textAlign: 'center', fontWeight: '600', fontSize: '0.85rem', color: 'var(--success)' }}>{kab.lolos}</div>
+        <div style={{ textAlign: 'center', fontWeight: '600', fontSize: '0.85rem', color: '#856404' }}>{kab.tidak_lolos}</div>
+        <div style={{ textAlign: 'center', fontWeight: '600', fontSize: '0.85rem', color: 'var(--danger)' }}>{kab.belum_verifikasi}</div>
+        <div style={{ textAlign: 'center' }}>
+          <span 
+            style={{ 
+              cursor: 'pointer', fontSize: '0.75rem', color: 'var(--primary)',
+              fontWeight: '600', padding: '2px 8px', borderRadius: '4px',
+              backgroundColor: isExpanded ? 'var(--primary-light)' : 'transparent'
+            }}
+          >
+            {isExpanded ? 'Tutup' : 'Buka'}
+          </span>
+        </div>
+      </div>
+      {isExpanded && kab.children && kab.children.length > 0 && (
+        <div style={{ marginLeft: '20px' }}>
+          {kab.children.map((pengusul, idx) => (
+            <div 
+              key={idx}
+              style={{ 
+                display: 'grid',
+                gridTemplateColumns: 'minmax(200px, 2fr) repeat(5, 90px)',
+                alignItems: 'center',
+                padding: '10px 14px',
+                borderBottom: '1px dashed #e9ecef',
+                backgroundColor: '#fafbfc'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', paddingLeft: '20px' }}>
+                <span style={{ borderLeft: '2px dashed #dee2e6', marginLeft: '9px', height: '100%', display: 'inline-block' }}></span>
+                <span style={{ fontWeight: '500', fontSize: '0.85rem' }}>{pengusul.name}</span>
+              </div>
+              <div style={{ textAlign: 'center', fontWeight: '600', fontSize: '0.85rem' }}>{pengusul.cpb}</div>
+              <div style={{ textAlign: 'center', fontWeight: '600', fontSize: '0.85rem', color: 'var(--success)' }}>{pengusul.lolos}</div>
+              <div style={{ textAlign: 'center', fontWeight: '600', fontSize: '0.85rem', color: '#856404' }}>{pengusul.tidak_lolos}</div>
+              <div style={{ textAlign: 'center', fontWeight: '600', fontSize: '0.85rem', color: 'var(--danger)' }}>{pengusul.belum_verifikasi}</div>
+              <div></div>
+            </div>
+          ))}
+        </div>
+      )}
+      {isExpanded && (!kab.children || kab.children.length === 0) && (
+        <div style={{ padding: '12px 14px 12px 48px', color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '0.85rem', backgroundColor: '#fafbfc', borderBottom: '1px solid #e9ecef' }}>
+          Tidak ada data pengusul untuk kabupaten ini.
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Recursive Tree Node Component for Pengusul Center (Table-like)
 function TreeNode({ node, level = 0, columns = 5 }) {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -249,11 +327,13 @@ function App() {
   };
 
   // State Overview Subtabs
-  const [overviewSubTab, setOverviewSubTab] = useState('summary_table'); // 'summary_table' atau 'tree_pengusul'
+  const [overviewSubTab, setOverviewSubTab] = useState('summary_table'); // 'summary_table', 'tree_pengusul', atau 'kabupaten_pengusul'
   const [selectedPengusulFilter, setSelectedPengusulFilter] = useState('ALL');
+  const [kabPengusulTree, setKabPengusulTree] = useState([]);
 
   // State Rekap Keseluruhan
   const [rekapData, setRekapData] = useState(null);
+  const [rekapUnggahanData, setRekapUnggahanData] = useState(null);
   const [rekapLoading, setRekapLoading] = useState(false);
 
   // State Pencarian Global
@@ -346,6 +426,7 @@ function App() {
       setOverviewStats(null);
       setOverviewTables(null);
       setPengusulTree([]);
+      setKabPengusulTree([]);
       setUnmatchedInvers([]);
       setManualPairs([]);
     }
@@ -405,6 +486,13 @@ function App() {
         const treeData = await treeRes.json();
         setPengusulTree(treeData);
       }
+
+      // 6. Ambil Kabupaten > Pengusul Tree
+      const kabTreeRes = await fetch(`${BACKEND_URL}/api/stage/${stageId}/kabupaten-pengusul-tree`);
+      if (kabTreeRes.ok) {
+        const kabTreeData = await kabTreeRes.json();
+        setKabPengusulTree(kabTreeData);
+      }
     } catch (err) {
       showToast(err.message, 'error');
     }
@@ -413,10 +501,24 @@ function App() {
   const fetchRekapKeseluruhan = async () => {
     setRekapLoading(true);
     try {
-      const res = await fetch(`${BACKEND_URL}/api/rekap-keseluruhan`);
+      const res = await fetch(`${BACKEND_URL}/api/rekap-keseluruhan?published_only=1`);
       if (!res.ok) throw new Error("Gagal mengambil data rekap keseluruhan");
       const data = await res.json();
       setRekapData(data);
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setRekapLoading(false);
+    }
+  };
+
+  const fetchRekapUnggahan = async () => {
+    setRekapLoading(true);
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/rekap-keseluruhan`);
+      if (!res.ok) throw new Error("Gagal mengambil data rekap unggahan");
+      const data = await res.json();
+      setRekapUnggahanData(data);
     } catch (err) {
       showToast(err.message, 'error');
     } finally {
@@ -672,6 +774,20 @@ function App() {
       if (!res.ok) throw new Error("Gagal menghapus data");
       const data = await res.json();
       showToast(data.message || "Berita Acara berhasil dihapus");
+      fetchStageData(selectedStageId);
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  };
+
+  const handleTogglePublished = async (batchId) => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/verified/batch/${batchId}/toggle-published`, {
+        method: 'POST'
+      });
+      if (!res.ok) throw new Error("Gagal mengubah status");
+      const data = await res.json();
+      showToast(data.is_published ? "Berita Acara ditandai sudah terbit" : "Berita Acara ditandai belum terbit");
       fetchStageData(selectedStageId);
     } catch (err) {
       showToast(err.message, 'error');
@@ -1375,6 +1491,7 @@ function App() {
       setOverviewStats(null);
       setOverviewTables(null);
       setPengusulTree([]);
+      setKabPengusulTree([]);
       await fetchStages();
     } catch (err) {
       showToast(err.message, 'error');
@@ -1949,7 +2066,7 @@ function App() {
             </li>
             <li 
               className={`menu-item ${activeTab === 'rekap-unggahan' ? 'active' : ''}`}
-              onClick={() => { setActiveTab('rekap-unggahan'); fetchRekapKeseluruhan(); }}
+              onClick={() => { setActiveTab('rekap-unggahan'); fetchRekapUnggahan(); }}
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
               Rekap Unggahan
@@ -2139,6 +2256,7 @@ function App() {
                       <th>Tidak Lolos</th>
                       <th>CPB Pengganti</th>
                       <th>Jumlah Verifikasi</th>
+                      <th>Terbit</th>
                       <th>Aksi</th>
                     </tr>
                   </thead>
@@ -2164,6 +2282,17 @@ function App() {
                             <td>{b.tidak_lolos_count} CPB</td>
                             <td>{b.replacement_count} CPB</td>
                             <td style={{ fontWeight: '600' }}>{b.lolos_count + b.tidak_lolos_count} CPB</td>
+                            <td style={{ textAlign: 'center' }}>
+                              <label className="publish-checkbox" title={b.is_published ? "Sudah terbit — klik untuk batalkan" : "Belum terbit — klik untuk tandai terbit"}>
+                                <input
+                                  type="checkbox"
+                                  checked={!!b.is_published}
+                                  onChange={() => handleTogglePublished(b.id)}
+                                />
+                                <span className="publish-checkmark"></span>
+                                <span className="publish-label">{b.is_published ? 'Ya' : 'Tidak'}</span>
+                              </label>
+                            </td>
                             <td>
                               <div style={{ display: 'flex', gap: '8px' }}>
                                 <button 
@@ -2199,7 +2328,7 @@ function App() {
                           </tr>
                           {isExpanded && (
                             <tr className="batch-breakdown-row">
-                              <td colSpan="7" style={{ padding: '0 16px 12px 32px' }}>
+                              <td colSpan="8" style={{ padding: '0 16px 12px 32px' }}>
                                 <div className="batch-breakdown-inner">
                                   <table className="data-table" style={{ margin: 0 }}>
                                     <thead>
@@ -2236,7 +2365,7 @@ function App() {
                     })}
                     {!stageSummary?.batches?.length && (
                       <tr>
-                        <td colSpan="7" style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+                        <td colSpan="8" style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
                           Belum ada batch verifikasi yang diunggah. Buka menu Unggah Data untuk menambahkan.
                         </td>
                       </tr>
@@ -2605,6 +2734,12 @@ function App() {
                 >
                   Hirarki Usulan Pengusul
                 </button>
+                <button 
+                  className={`tab-btn ${overviewSubTab === 'kabupaten_pengusul' ? 'active' : ''}`}
+                  onClick={() => setOverviewSubTab('kabupaten_pengusul')}
+                >
+                  Rekap Per Kabupaten
+                </button>
               </div>
             </div>
 
@@ -2678,7 +2813,7 @@ function App() {
                   </div>
                 </div>
               </div>
-            ) : (
+            ) : overviewSubTab === 'tree_pengusul' ? (
               <div style={{ marginTop: '16px' }}>
                 <div className="filter-bar" style={{ marginBottom: '0' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -2740,6 +2875,52 @@ function App() {
                   {getFilteredPengusulTree().length === 0 && (
                     <div style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
                       Belum ada data pohon hirarki pengusul. Silakan unggah berkas INVERS terlebih dahulu.
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div style={{ marginTop: '16px' }}>
+                <div className="filter-bar" style={{ marginBottom: '0' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <span style={{ fontSize: '0.9rem', fontWeight: 600 }}>Rekap Per Kabupaten</span>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                      Klik pada baris kabupaten untuk melihat daftar pengusul
+                    </span>
+                  </div>
+                </div>
+
+                <div className="tree-container" style={{ padding: '0', maxHeight: '600px' }}>
+                  {/* Table Header */}
+                  <div style={{ 
+                    display: 'grid', 
+                    gridTemplateColumns: 'minmax(200px, 2fr) repeat(5, 90px)',
+                    alignItems: 'center',
+                    padding: '12px 14px',
+                    backgroundColor: 'var(--primary)',
+                    color: 'white',
+                    fontWeight: '700',
+                    fontSize: '0.8rem',
+                    position: 'sticky',
+                    top: 0,
+                    zIndex: 10,
+                    borderBottom: '2px solid var(--primary-hover)'
+                  }}>
+                    <div style={{ paddingLeft: '28px' }}>Kabupaten / Pengusul</div>
+                    <div style={{ textAlign: 'center' }}>CPB</div>
+                    <div style={{ textAlign: 'center' }}>Lolos</div>
+                    <div style={{ textAlign: 'center' }}>Tidak Lolos</div>
+                    <div style={{ textAlign: 'center' }}>Belum</div>
+                    <div style={{ textAlign: 'center' }}>Aksi</div>
+                  </div>
+
+                  {/* Kabupaten Rows */}
+                  {kabPengusulTree.map((kab, idx) => (
+                    <KabupatenPengusulRow key={idx} kab={kab} />
+                  ))}
+                  {kabPengusulTree.length === 0 && (
+                    <div style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+                      Belum ada data rekap per kabupaten. Silakan unggah berkas INVERS terlebih dahulu.
                     </div>
                   )}
                 </div>
@@ -3982,7 +4163,7 @@ function App() {
                   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "6px", verticalAlign: "middle" }}><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>Rekap Keseluruhan Semua INVERS
                 </h2>
                 <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                  Rekapitulasi total alokasi, verifikasi, lolos, tidak lolos, dan belum verifikasi per kabupaten lintas semua tahap.
+                  Rekapitulasi total alokasi, verifikasi, lolos, tidak lolos, dan belum verifikasi per kabupaten lintas semua tahap. Hanya menghitung Berita Acara yang sudah ditandai "Sudah Terbit".
                 </p>
               </div>
               {!rekapLoading && rekapData && rekapData.stages.length > 0 && (
@@ -4172,6 +4353,7 @@ function App() {
                 <>
                   {renderRekapTable(murniStages, 'Tabel Invers Murni')}
                   {renderRekapTable(penggantiStages, 'Tabel Invers Pengganti')}
+                  {renderRekapTable(sortedRekapStages, 'Tabel Keseluruhan')}
                 </>
               );
             })()}
@@ -4190,7 +4372,7 @@ function App() {
                   Rekapitulasi jumlah CPB per kabupaten pada setiap tahap INVERS berdasarkan data yang sudah diunggah.
                 </p>
               </div>
-              {!rekapLoading && rekapData && rekapData.stages.length > 0 && (
+              {!rekapLoading && rekapUnggahanData && rekapUnggahanData.stages.length > 0 && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                   <button 
                     className="btn btn-secondary btn-sm"
@@ -4211,14 +4393,14 @@ function App() {
               </div>
             )}
 
-            {!rekapLoading && rekapData && rekapData.stages.length === 0 && (
+            {!rekapLoading && rekapUnggahanData && rekapUnggahanData.stages.length === 0 && (
               <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-muted)' }}>
                 Belum ada data INVERS yang tersedia.
               </div>
             )}
 
-            {!rekapLoading && rekapData && rekapData.stages.length > 0 && (() => {
-              const sortedRekapStages = [...rekapData.stages].sort((a, b) => {
+            {!rekapLoading && rekapUnggahanData && rekapUnggahanData.stages.length > 0 && (() => {
+              const sortedRekapStages = [...rekapUnggahanData.stages].sort((a, b) => {
                 const numA = parseInt(a.stage_name.replace(/\D/g, '')) || 0;
                 const numB = parseInt(b.stage_name.replace(/\D/g, '')) || 0;
                 return numA - numB;
@@ -4278,7 +4460,7 @@ function App() {
                           </tr>
                         </thead>
                         <tbody>
-                          {rekapData.all_kabupaten.map((kab, kabIdx) => {
+                          {rekapUnggahanData.all_kabupaten.map((kab, kabIdx) => {
                             const hasAnyData = groupStages.some(stage => {
                               const kd = stage.kabupaten_data[kabIdx];
                               return kd && (kd.alokasi > 0 || kd.verifikasi > 0);
@@ -4372,6 +4554,7 @@ function App() {
                 <>
                   {renderRekapTable(murniStages, 'Tabel Invers Murni')}
                   {renderRekapTable(penggantiStages, 'Tabel Invers Pengganti')}
+                  {renderRekapTable(sortedRekapStages, 'Tabel Keseluruhan')}
                 </>
               );
             })()}
