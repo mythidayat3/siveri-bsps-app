@@ -3740,6 +3740,37 @@ def get_sk_dirjen_rekap_per_kabupaten_all():
         "invers_stages": inv_stages
     }
 
+@app.get("/api/sk-dirjen/sumber-selisih-detail")
+def get_sumber_selisih_detail(kabupaten: str, batch_name: str, stage_name: str):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT vr.nama, vr.no_ktp, vr.no_kk, vr.desa_kelurahan, 
+               vr.kecamatan, vr.kabupaten_kota
+        FROM verified_records vr
+        JOIN verified_batches vb ON vr.batch_id = vb.id
+        JOIN invers_stages ist ON vb.stage_id = ist.id
+        WHERE vr.status = 'LOLOS' 
+        AND vb.is_published = 1
+        AND UPPER(TRIM(vr.kabupaten_kota)) = UPPER(TRIM(?))
+        AND vb.name = ?
+        AND ist.name = ?
+        AND vr.id NOT IN (
+            SELECT m.verified_record_id FROM sk_dirjen_matches m
+            WHERE m.verified_record_id IS NOT NULL
+            AND (m.match_type = 'PERFECT' 
+                OR (m.match_type = 'NEEDS_APPROVAL' AND m.override_status = 'APPROVED')
+                OR m.match_type = 'MANUAL_PAIR')
+        )
+        ORDER BY vr.nama
+    """, (kabupaten, batch_name, stage_name))
+    
+    records = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    
+    return {"records": records}
+
 @app.get("/api/sk-dirjen/rekap-per-kabupaten/{batch_id}")
 def get_sk_dirjen_rekap_per_kabupaten(batch_id: int):
     conn = get_db_connection()

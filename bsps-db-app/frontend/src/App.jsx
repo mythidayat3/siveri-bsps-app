@@ -390,6 +390,9 @@ function App() {
   const [skDirjenPairSearchTerm, setSkDirjenPairSearchTerm] = useState('');
   const [skDirjenPairSearchResults, setSkDirjenPairSearchResults] = useState([]);
   const [sumberSelisihPopup, setSumberSelisihPopup] = useState(null);
+  const [expandedSumber, setExpandedSumber] = useState(null);
+  const [sumberDetail, setSumberDetail] = useState([]);
+  const [sumberDetailLoading, setSumberDetailLoading] = useState(false);
 
   // State Notifikasi Toast
   const [toast, setToast] = useState(null);
@@ -1029,6 +1032,25 @@ function App() {
       setSkDirjenRekapPerKab(data);
     } catch (err) {
       showToast("Gagal memuat rekap kabupaten: " + err.message, 'error');
+    }
+  };
+
+  const fetchSumberSelisihDetail = async (kab, batchName, stageName, idx) => {
+    if (expandedSumber?.kab === kab && expandedSumber?.idx === idx) {
+      setExpandedSumber(null);
+      return;
+    }
+    setExpandedSumber({ kab, idx });
+    setSumberDetailLoading(true);
+    try {
+      const params = new URLSearchParams({ kabupaten: kab, batch_name: batchName, stage_name: stageName });
+      const res = await fetch(`${BACKEND_URL}/api/sk-dirjen/sumber-selisih-detail?${params}`);
+      const data = await res.json();
+      setSumberDetail(data.records || []);
+    } catch (err) {
+      setSumberDetail([]);
+    } finally {
+      setSumberDetailLoading(false);
     }
   };
 
@@ -4103,16 +4125,64 @@ function App() {
                     <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '12px' }}>
                       Data CPB lolos yang belum terdokumentasi di SK Dirjen:
                     </p>
-                    {sumberSelisihPopup.data.map((item, idx) => (
-                      <div key={idx} className="sumber-selisih-item">
-                        <span className="sumber-selisih-num">{idx + 1}.</span>
-                        <div className="sumber-selisih-info">
-                          <span className="sumber-selisih-batch">{item.batch_name}</span>
-                          <span className="sumber-selisih-stage">{item.stage_name}</span>
+                    {sumberSelisihPopup.data.map((item, idx) => {
+                      const isExpanded = expandedSumber?.kab === sumberSelisihPopup.kabupaten && expandedSumber?.idx === idx;
+                      return (
+                        <div key={idx}>
+                          <div 
+                            className="sumber-selisih-item sumber-selisih-item-expandable"
+                            onClick={() => fetchSumberSelisihDetail(sumberSelisihPopup.kabupaten, item.batch_name, item.stage_name, idx)}
+                          >
+                            <span className="sumber-selisih-num">{idx + 1}.</span>
+                            <div className="sumber-selisih-info">
+                              <span className="sumber-selisih-batch">{item.batch_name}</span>
+                              <span className="sumber-selisih-stage">{item.stage_name}</span>
+                            </div>
+                            <span className="sumber-selisih-count">{item.cnt} PB</span>
+                            <span className="sumber-selisih-expand-icon">{isExpanded ? '\u25B2' : '\u25BC'}</span>
+                          </div>
+                          {isExpanded && (
+                            <div className="sumber-selisih-detail">
+                              {sumberDetailLoading ? (
+                                <div className="sumber-selisih-detail-loading">Memuat data...</div>
+                              ) : sumberDetail.length > 0 ? (
+                                <>
+                                  <div className="sumber-selisih-detail-info">
+                                    Menampilkan {sumberDetail.length} data
+                                  </div>
+                                  <table className="sumber-selisih-detail-table">
+                                    <thead>
+                                      <tr>
+                                        <th>No</th>
+                                        <th>Nama</th>
+                                        <th>NIK</th>
+                                        <th>No.KK</th>
+                                        <th>Desa/Kelurahan</th>
+                                        <th>Kabupaten</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {sumberDetail.map((rec, i) => (
+                                        <tr key={i}>
+                                          <td>{i + 1}</td>
+                                          <td>{rec.nama}</td>
+                                          <td>{rec.no_ktp}</td>
+                                          <td>{rec.no_kk}</td>
+                                          <td>{rec.desa_kelurahan}</td>
+                                          <td>{rec.kabupaten_kota}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </>
+                              ) : (
+                                <div className="sumber-selisih-detail-empty">Tidak ada data</div>
+                              )}
+                            </div>
+                          )}
                         </div>
-                        <span className="sumber-selisih-count">{item.cnt} PB</span>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               </div>

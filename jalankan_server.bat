@@ -9,7 +9,7 @@ echo.
 cd /d "%~dp0"
 
 echo [1/3] Menjalankan Server Backend (FastAPI)...
-start "Backend - BSPS DB" cmd /k "cd /d bsps-db-app\backend && uvicorn app:app --host 127.0.0.1 --port 8000"
+start "Backend - BSPS DB" cmd /k "cd /d bsps-db-app\backend && uvicorn app:app --host 127.0.0.1 --port 8000 --reload"
 
 echo [2/3] Menjalankan Server Frontend (Vite React)...
 start "Frontend - BSPS DB" cmd /k "cd /d bsps-db-app\frontend && npx vite --host 127.0.0.1 --port 3000"
