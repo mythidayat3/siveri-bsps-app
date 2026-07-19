@@ -4,6 +4,12 @@ import sqlite3
 import openpyxl
 import docx
 import zipfile
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import cm, mm
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+from reportlab.lib import colors
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Body
@@ -1390,6 +1396,222 @@ async def export_docx_files(
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr(f"{stage_upper}_BAHV_{batch_name or stage_name}.docx", stream_ba.getvalue())
         z.writestr(f"{stage_upper}_PENYAMPAIAN_BAHV_{batch_name or stage_name}.docx", stream_sp.getvalue())
+    zip_buffer.seek(0)
+    
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename=DRAFT_SURAT_BA_{name_suffix}.zip"}
+    )
+
+@app.post("/api/export/pdf")
+async def export_pdf_files(
+    stage_id: int = Form(...),
+    batch_id: int = Form(None),
+    nomor_ba: str = Form(""),
+    nomor_surat: str = Form(""),
+    tanggal_ba: str = Form(""),
+    lokasi_ba: str = Form(""),
+    no_surat_dirjen: str = Form(""),
+    tgl_surat_dirjen: str = Form(""),
+    hal_surat_dirjen: str = Form("")
+):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT name FROM invers_stages WHERE id = ?", (stage_id,))
+    stage_name = cursor.fetchone()['name']
+    
+    batch_name = None
+    if batch_id:
+        cursor.execute("SELECT name FROM verified_batches WHERE id = ?", (batch_id,))
+        batch_row = cursor.fetchone()
+        if batch_row:
+            batch_name = batch_row['name']
+    
+    cursor.execute("""
+        SELECT COUNT(*) as cnt FROM invers_records ir
+        JOIN invers_revisions irv ON ir.revision_id = irv.id
+        WHERE irv.stage_id = ? AND irv.is_active = 1
+    """, (stage_id,))
+    total_invers = cursor.fetchone()['cnt']
+    
+    if batch_id:
+        cursor.execute("""
+            SELECT COUNT(*) as cnt FROM verified_records vr
+            LEFT JOIN reconciliation_overrides ro ON ro.original_no_ktp = vr.no_ktp AND ro.stage_id = ?
+            WHERE vr.batch_id = ? AND (vr.is_duplicate_in_previous = 0 OR ro.id IS NOT NULL)
+        """, (stage_id, batch_id))
+    else:
+        cursor.execute("""
+            SELECT COUNT(*) as cnt FROM verified_records vr
+            JOIN verified_batches vb ON vr.batch_id = vb.id
+            LEFT JOIN reconciliation_overrides ro ON ro.original_no_ktp = vr.no_ktp AND ro.stage_id = vb.stage_id
+            WHERE vb.stage_id = ? AND (vr.is_duplicate_in_previous = 0 OR ro.id IS NOT NULL)
+        """, (stage_id,))
+    total_verifikasi_aktif = cursor.fetchone()['cnt']
+    
+    cursor.execute("""
+        SELECT COUNT(*) as cnt FROM verified_records vr
+        JOIN verified_batches vb ON vr.batch_id = vb.id
+        LEFT JOIN reconciliation_overrides ro ON ro.original_no_ktp = vr.no_ktp AND ro.stage_id = vb.stage_id
+        WHERE vb.stage_id = ? AND (vr.is_duplicate_in_previous = 0 OR ro.id IS NOT NULL)
+    """, (stage_id,))
+    total_verif_tahap_seluruhnya = cursor.fetchone()['cnt']
+    sisa_belum_verif = max(0, total_invers - total_verif_tahap_seluruhnya)
+    
+    if batch_id:
+        cursor.execute("""
+            SELECT vr.kabupaten_kota,
+                   SUM(CASE WHEN vr.status = 'LOLOS' THEN 1 ELSE 0 END) as lolos,
+                   SUM(CASE WHEN vr.status = 'TIDAK LOLOS' THEN 1 ELSE 0 END) as tidak_lolos,
+                   COUNT(*) as total
+            FROM verified_records vr
+            LEFT JOIN reconciliation_overrides ro ON ro.original_no_ktp = vr.no_ktp AND ro.stage_id = ?
+            WHERE vr.batch_id = ? AND (vr.is_duplicate_in_previous = 0 OR ro.id IS NOT NULL)
+            GROUP BY UPPER(TRIM(vr.kabupaten_kota))
+            ORDER BY vr.kabupaten_kota ASC
+        """, (stage_id, batch_id))
+    else:
+        cursor.execute("""
+            SELECT vr.kabupaten_kota,
+                   SUM(CASE WHEN vr.status = 'LOLOS' THEN 1 ELSE 0 END) as lolos,
+                   SUM(CASE WHEN vr.status = 'TIDAK LOLOS' THEN 1 ELSE 0 END) as tidak_lolos,
+                   COUNT(*) as total
+            FROM verified_records vr
+            JOIN verified_batches vb ON vr.batch_id = vb.id
+            LEFT JOIN reconciliation_overrides ro ON ro.original_no_ktp = vr.no_ktp AND ro.stage_id = vb.stage_id
+            WHERE vb.stage_id = ? AND (vr.is_duplicate_in_previous = 0 OR ro.id IS NOT NULL)
+            GROUP BY UPPER(TRIM(vr.kabupaten_kota))
+            ORDER BY vr.kabupaten_kota ASC
+        """, (stage_id,))
+    kab_details = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    
+    perihal_surat = f"Penyampaian Hasil Verifikasi Calon Penerima Bantuan (CPB) Kegiatan Bantuan Stimulan Perumahan Swadaya (BSPS) {stage_name} TA 2026 Provinsi Sulawesi Selatan"
+    
+    styles = getSampleStyleSheet()
+    
+    style_title = ParagraphStyle('TitleBA', parent=styles['Title'], fontName='Times-Bold', fontSize=14, alignment=TA_CENTER, spaceAfter=6)
+    style_nomor = ParagraphStyle('NomorBA', parent=styles['Normal'], fontName='Times-Bold', fontSize=11, alignment=TA_CENTER, spaceAfter=4)
+    style_subtitle = ParagraphStyle('SubtitleBA', parent=styles['Normal'], fontName='Times-Bold', fontSize=11, alignment=TA_CENTER, spaceAfter=2)
+    style_normal = ParagraphStyle('NormalBA', parent=styles['Normal'], fontName='Times-Roman', fontSize=11, alignment=TA_JUSTIFY, spaceAfter=6, leading=14)
+    style_body = ParagraphStyle('BodyBA', parent=styles['Normal'], fontName='Times-Roman', fontSize=11, alignment=TA_JUSTIFY, spaceAfter=8, leading=15, firstLineIndent=2*cm)
+    style_footer = ParagraphStyle('FooterBA', parent=styles['Normal'], fontName='Times-Roman', fontSize=11, alignment=TA_LEFT, spaceAfter=4)
+    style_small = ParagraphStyle('SmallBA', parent=styles['Normal'], fontName='Times-Roman', fontSize=9.5, alignment=TA_LEFT, spaceAfter=2, leading=12)
+    
+    elements_ba = []
+    elements_ba.append(Spacer(1, 1*cm))
+    elements_ba.append(Paragraph("BERITA ACARA", style_title))
+    elements_ba.append(Paragraph(f"NOMOR : {nomor_ba}", style_nomor))
+    elements_ba.append(Spacer(1, 0.3*cm))
+    elements_ba.append(Paragraph(f"HASIL VERIFIKASI CALON PENERIMA BANTUAN (CPB) {stage_name.upper()}", style_subtitle))
+    elements_ba.append(Paragraph("KEGIATAN BANTUAN STIMULAN PERUMAHAN SWADAYA (BSPS) TA.2026", style_subtitle))
+    elements_ba.append(Paragraph("PROVINSI SULAWESI SELATAN", style_subtitle))
+    elements_ba.append(Spacer(1, 0.8*cm))
+    elements_ba.append(Paragraph(
+        f"Sehubungan dengan pelaksanaan verifikasi calon penerima bantuan yang telah dilakukan di "
+        f"Provinsi Sulawesi Selatan dengan {stage_name}, maka bersama ini disampaikan Berita Acara "
+        f"Hasil Verifikasi Calon Penerima Bantuan (CPB) Kegiatan Bantuan Stimulan Perumahan Swadaya "
+        f"(BSPS) Tahun Anggaran 2026.", style_body))
+    elements_ba.append(Paragraph(
+        f"Data usulan calon penerima bantuan di Provinsi Sulawesi Selatan dengan Alokasi "
+        f"{total_invers} unit, telah dilakukan verifikasi lapangan terhadap calon penerima bantuan "
+        f"dengan hasil sebagaimana berikut:", style_body))
+    elements_ba.append(Spacer(1, 0.3*cm))
+    elements_ba.append(Paragraph("Lampiran I  Hasil Verifikasi Calon Penerima Bantuan Kegiatan BSPS Tahun Anggaran 2026 di Provinsi Sulawesi Selatan", style_normal))
+    elements_ba.append(Paragraph("Lampiran II  Daftar Calon Penerima Bantuan Kegiatan BSPS Tahun Anggaran 2026 Provinsi Sulawesi Selatan", style_normal))
+    elements_ba.append(Paragraph("Lampiran III  Daftar Calon Penerima Bantuan Pengganti Kegiatan BSPS Tahun Anggaran 2026 Provinsi Sulawesi Selatan", style_normal))
+    elements_ba.append(Spacer(1, 0.3*cm))
+    elements_ba.append(Paragraph(
+        "Penggantian data calon penerima bantuan bersumber dari data pengusul K/L, aplikasi e-RTLH, "
+        "DTKS, sistem informasi lainnya, serta hasil verifikasi dan validasi lapangan.", style_body))
+    elements_ba.append(Paragraph(
+        "Demikian Berita Acara ini dibuat dengan sebenarnya dan dapat dipergunakan sebagaimana mestinya.", style_body))
+    elements_ba.append(Spacer(1, 1.5*cm))
+    elements_ba.append(Paragraph(f"{lokasi_ba}, {tanggal_ba}", style_footer))
+    elements_ba.append(Spacer(1, 1.5*cm))
+    
+    elements_ba.append(Paragraph("Membuat Berita Acara,", style_footer))
+    elements_ba.append(Spacer(1, 1.5*cm))
+    elements_ba.append(Paragraph("_________________________", style_footer))
+    elements_ba.append(Paragraph("Operator Verifikasi", style_small))
+    
+    stream_ba = io.BytesIO()
+    doc_ba = SimpleDocTemplate(stream_ba, pagesize=A4, leftMargin=2.5*cm, rightMargin=2.5*cm, topMargin=2*cm, bottomMargin=2*cm)
+    doc_ba.build(elements_ba)
+    stream_ba.seek(0)
+    
+    elements_sp = []
+    elements_sp.append(Spacer(1, 1*cm))
+    elements_sp.append(Paragraph(f"Nomor\t\t: {nomor_surat}\t\t\t\t\t{lokasi_ba}, {tanggal_ba}", style_normal))
+    elements_sp.append(Paragraph("Sifat\t\t: Penting", style_normal))
+    elements_sp.append(Paragraph("Lampiran\t: 1 (Satu) Berkas", style_normal))
+    elements_sp.append(Paragraph(f"Perihal\t\t: {perihal_surat}.", style_normal))
+    elements_sp.append(Spacer(1, 0.8*cm))
+    elements_sp.append(Paragraph("Yth,", style_normal))
+    elements_sp.append(Paragraph("Direktur Jenderal Kawasan Permukiman", style_normal))
+    elements_sp.append(Paragraph("di-", style_normal))
+    elements_sp.append(Paragraph("          Jakarta", style_normal))
+    elements_sp.append(Spacer(1, 0.5*cm))
+    elements_sp.append(Paragraph(
+        f"Menindaklanjuti Surat Direktur Jenderal Kawasan Permukiman Nomor {no_surat_dirjen} "
+        f"Tanggal {tgl_surat_dirjen} {hal_surat_dirjen}.", style_body))
+    elements_sp.append(Paragraph(
+        f"Bersama surat ini kami sampaikan Hasil Verifikasi Calon Penerima Bantuan (CPB) "
+        f"Kegiatan BSPS {stage_name} Tahun Anggaran 2026 Provinsi Sulawesi Selatan.", style_body))
+    elements_sp.append(Spacer(1, 0.5*cm))
+    elements_sp.append(Paragraph("Rincian usulan per Kabupaten/Kota:", style_normal))
+    elements_sp.append(Spacer(1, 0.2*cm))
+    
+    table_data = [['No.', 'Kabupaten/Kota', 'Lolos', 'Tidak Lolos', 'Total']]
+    for idx, kab in enumerate(kab_details, 1):
+        kab_name = (kab['kabupaten_kota'] or "LAINNYA").upper().strip()
+        table_data.append([str(idx), kab_name, str(kab['lolos']), str(kab['tidak_lolos']), str(kab['total'])])
+    table_data.append(['', 'TOTAL', '', '', str(total_verifikasi_aktif)])
+    
+    t = Table(table_data, colWidths=[1*cm, 6*cm, 2.5*cm, 2.5*cm, 2.5*cm])
+    t.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.Color(0.9, 0.9, 0.9)),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
+        ('FONTNAME', (0, 0), (-1, 0), 'Times-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('FONTNAME', (0, 1), (-1, -1), 'Times-Roman'),
+        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+        ('ALIGN', (2, 1), (-1, -1), 'CENTER'),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+        ('FONTNAME', (0, -1), (-1, -1), 'Times-Bold'),
+        ('BACKGROUND', (0, -1), (-1, -1), colors.Color(0.95, 0.95, 0.95)),
+    ]))
+    elements_sp.append(t)
+    elements_sp.append(Spacer(1, 0.5*cm))
+    elements_sp.append(Paragraph(
+        f"Sebanyak {total_verifikasi_aktif} unit dari total {total_invers} unit telah diverifikasi, "
+        f"sehingga yang masih dalam proses verifikasi sebanyak {sisa_belum_verif} unit.", style_body))
+    elements_sp.append(Paragraph(
+        "Demikian surat ini disampaikan, atas perhatian dan perkenaan Bapak, kami ucapkan terima kasih.", style_body))
+    elements_sp.append(Spacer(1, 1.5*cm))
+    elements_sp.append(Paragraph("Kepala Balai,", style_footer))
+    elements_sp.append(Spacer(1, 2*cm))
+    elements_sp.append(Paragraph("_________________________", style_footer))
+    elements_sp.append(Paragraph("Bakhtiar", style_small))
+    elements_sp.append(Paragraph("NIP. 19711009 200212 1 003", style_small))
+    elements_sp.append(Spacer(1, 0.8*cm))
+    elements_sp.append(Paragraph("Tembusan:", style_small))
+    elements_sp.append(Paragraph("1. Direktur Jenderal Tata Kelola dan Pengendalian Resiko;", style_small))
+    elements_sp.append(Paragraph("2. Kepala Pusat Data dan Informasi, Sekretariat Jenderal Kementerian PKP.", style_small))
+    
+    stream_sp = io.BytesIO()
+    doc_sp = SimpleDocTemplate(stream_sp, pagesize=A4, leftMargin=2.5*cm, rightMargin=2.5*cm, topMargin=2*cm, bottomMargin=2*cm)
+    doc_sp.build(elements_sp)
+    stream_sp.seek(0)
+    
+    name_suffix = (batch_name or stage_name).replace(' ', '_')
+    stage_upper = stage_name.upper()
+    
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr(f"{stage_upper}_BAHV_{batch_name or stage_name}.pdf", stream_ba.getvalue())
+        z.writestr(f"{stage_upper}_PENYAMPAIAN_BAHV_{batch_name or stage_name}.pdf", stream_sp.getvalue())
     zip_buffer.seek(0)
     
     return StreamingResponse(
@@ -3456,7 +3678,7 @@ def get_sk_dirjen_rekap_per_kabupaten_all():
         SELECT UPPER(TRIM(COALESCE(vr.kabupaten_kota, ''))) as kab, COUNT(*) as cnt
         FROM verified_records vr
         JOIN verified_batches vb ON vb.id = vr.batch_id
-        WHERE vr.status = 'LOLOS'
+        WHERE vr.status = 'LOLOS' AND vb.is_published = 1
         GROUP BY kab
     """)
     lolos_by_kab = {row['kab']: row['cnt'] for row in cursor.fetchall()}
@@ -3484,6 +3706,30 @@ def get_sk_dirjen_rekap_per_kabupaten_all():
         kab_row['cpb_lolos'] = cpb_lolos
         kab_row['total'] = total
         kab_row['selisih_sk'] = cpb_lolos - total
+        
+        sumber_list = []
+        if cpb_lolos - total > 0:
+            cursor.execute("""
+                SELECT vb.name as batch_name, ist.name as stage_name, COUNT(*) as cnt
+                FROM verified_records vr
+                JOIN verified_batches vb ON vr.batch_id = vb.id
+                JOIN invers_stages ist ON vb.stage_id = ist.id
+                WHERE vr.status = 'LOLOS' 
+                AND vb.is_published = 1
+                AND UPPER(TRIM(vr.kabupaten_kota)) = ?
+                AND vr.id NOT IN (
+                    SELECT m.verified_record_id FROM sk_dirjen_matches m
+                    WHERE m.verified_record_id IS NOT NULL
+                    AND (m.match_type = 'PERFECT' 
+                        OR (m.match_type = 'NEEDS_APPROVAL' AND m.override_status = 'APPROVED')
+                        OR m.match_type = 'MANUAL_PAIR')
+                )
+                GROUP BY vb.name, ist.name
+                ORDER BY ist.name, vb.name
+            """, (kab,))
+            sumber_list = [dict(row) for row in cursor.fetchall()]
+        kab_row['sumber_selisih'] = sumber_list
+        
         table_data.append(kab_row)
     
     conn.close()

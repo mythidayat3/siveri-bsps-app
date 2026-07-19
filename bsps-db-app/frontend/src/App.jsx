@@ -207,6 +207,7 @@ function App() {
   const [stages, setStages] = useState([]);
   const [selectedStageId, setSelectedStageId] = useState('');
   const [stageSummary, setStageSummary] = useState(null);
+  const [darkMode, setDarkMode] = useState(() => localStorage.getItem('darkMode') === 'true');
   const [recordsData, setRecordsData] = useState(null);
   
   // Dashboard & Rekap Center Data
@@ -219,6 +220,7 @@ function App() {
   const [stageNameInput, setStageNameInput] = useState('');
   const [batchNameInput, setBatchNameInput] = useState('Berita Acara Pertama');
   const [selectedFile, setSelectedFile] = useState(null);
+  const [isDragOver, setIsDragOver] = useState(false);
   
   // State Pencarian & Filter
   const [searchTerm, setSearchTerm] = useState('');
@@ -233,6 +235,10 @@ function App() {
   const [verifiedKabFilter, setVerifiedKabFilter] = useState('ALL');
   const [verifiedDesaFilter, setVerifiedDesaFilter] = useState('ALL');
   const [verifiedHasilFilter, setVerifiedHasilFilter] = useState('ALL');
+
+  // State Filter Tabel Berita Acara
+  const [baSearchTerm, setBaSearchTerm] = useState('');
+  const [baFilterStatus, setBaFilterStatus] = useState('all');
   const [verifiedBatchFilter, setVerifiedBatchFilter] = useState('ALL');
   
   // State Edit Formulir (Rekonsiliasi Manual)
@@ -383,6 +389,7 @@ function App() {
   const [skDirjenPairingRecord, setSkDirjenPairingRecord] = useState(null);
   const [skDirjenPairSearchTerm, setSkDirjenPairSearchTerm] = useState('');
   const [skDirjenPairSearchResults, setSkDirjenPairSearchResults] = useState([]);
+  const [sumberSelisihPopup, setSumberSelisihPopup] = useState(null);
 
   // State Notifikasi Toast
   const [toast, setToast] = useState(null);
@@ -410,6 +417,12 @@ function App() {
   useEffect(() => {
     fetchStages();
   }, [fetchStages]);
+
+  // Dark Mode toggle
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', darkMode);
+    localStorage.setItem('darkMode', darkMode);
+  }, [darkMode]);
 
   // Ambil ringkasan dan data rekaman ketika tahap berubah
   useEffect(() => {
@@ -1573,6 +1586,51 @@ function App() {
     }
   };
 
+  const handlePdfExportSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const formData = new FormData();
+      formData.append('stage_id', selectedStageId);
+      if (selectedBatchIdForWord) {
+        formData.append('batch_id', selectedBatchIdForWord);
+      }
+      formData.append('nomor_ba', wordFormData.nomor_ba);
+      formData.append('nomor_surat', wordFormData.nomor_surat);
+      formData.append('tanggal_ba', wordFormData.tanggal_ba);
+      formData.append('lokasi_ba', wordFormData.lokasi_ba);
+      formData.append('no_surat_dirjen', wordFormData.no_surat_dirjen);
+      formData.append('tgl_surat_dirjen', wordFormData.tgl_surat_dirjen);
+      formData.append('hal_surat_dirjen', wordFormData.hal_surat_dirjen);
+
+      showToast("Sedang menyusun surat PDF...", "info");
+      const res = await fetch(`${BACKEND_URL}/api/export/pdf`, {
+        method: 'POST',
+        body: formData
+      });
+      if (!res.ok) throw new Error("Gagal mengekspor berkas PDF");
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      
+      const batchName = stageSummary?.batches?.find(b => b.id === selectedBatchIdForWord)?.name || '';
+      const nameSuffix = (batchName || selectedStageName).replace(/\s+/g, '_');
+      
+      a.download = `DRAFT_SURAT_BA_${nameSuffix}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      
+      setShowWordModal(false);
+      setSelectedBatchIdForWord(null);
+      showToast("Berkas BA PDF & Surat Penyampaian berhasil diunduh!");
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  };
+
   const selectedStageName = stages.find(s => s.id.toString() === selectedStageId)?.name || 'Tidak ada';
 
   // Filter pencarian data
@@ -1843,6 +1901,9 @@ function App() {
               >
                 Batal
               </button>
+              <button type="button" className="btn btn-secondary" onClick={handlePdfExportSubmit}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "6px", verticalAlign: "middle" }}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>Buat PDF
+              </button>
               <button type="submit" className="btn btn-primary">
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "6px", verticalAlign: "middle" }}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>Buat ZIP Dokumen
               </button>
@@ -2093,8 +2154,28 @@ function App() {
           </ul>
         </nav>
 
-        <div style={{ marginTop: 'auto', padding: '8px', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-          Kementerian PUPR â€¢ BSPS DB v1.1.0
+        <div style={{ marginTop: 'auto', padding: '8px' }}>
+          <button
+            onClick={() => setDarkMode(!darkMode)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '8px', width: '100%',
+              padding: '10px 12px', border: 'none', borderRadius: '8px', cursor: 'pointer',
+              background: darkMode ? 'var(--primary)' : 'var(--bg-main)',
+              color: darkMode ? 'white' : 'var(--text-main)',
+              fontSize: '0.85rem', fontWeight: '500', transition: 'var(--transition)'
+            }}
+            title={darkMode ? 'Mode Terang' : 'Mode Gelap'}
+          >
+            {darkMode ? (
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+            )}
+            {darkMode ? 'Mode Terang' : 'Mode Gelap'}
+          </button>
+          <div style={{ marginTop: '8px', fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center' }}>
+            Kementerian PUPR - BSPS DB v1.1.0
+          </div>
         </div>
       </aside>
 
@@ -2246,6 +2327,43 @@ function App() {
                 </div>
               </div>
 
+              {stageSummary?.batches?.length > 0 && (
+                <div style={{ display: 'flex', gap: '12px', alignItems: 'center', padding: '12px 0', borderBottom: '1px solid var(--border)' }}>
+                  <div style={{ position: 'relative', flex: 1, maxWidth: '320px' }}>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="Cari nama berita acara..."
+                      value={baSearchTerm}
+                      onChange={(e) => setBaSearchTerm(e.target.value)}
+                      style={{ paddingLeft: '32px', fontSize: '0.85rem' }}
+                    />
+                  </div>
+                  <select
+                    className="form-input"
+                    value={baFilterStatus}
+                    onChange={(e) => setBaFilterStatus(e.target.value)}
+                    style={{ fontSize: '0.85rem', maxWidth: '180px' }}
+                  >
+                    <option value="all">Semua Status</option>
+                    <option value="published">Sudah Terbit</option>
+                    <option value="unpublished">Belum Terbit</option>
+                  </select>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                    {(() => {
+                      const total = stageSummary.batches.length;
+                      const filtered = stageSummary.batches.filter(b => {
+                        const matchSearch = b.name.toLowerCase().includes(baSearchTerm.toLowerCase());
+                        const matchStatus = baFilterStatus === 'all' || (baFilterStatus === 'published' && b.is_published) || (baFilterStatus === 'unpublished' && !b.is_published);
+                        return matchSearch && matchStatus;
+                      }).length;
+                      return baSearchTerm || baFilterStatus !== 'all' ? `${filtered} dari ${total} batch` : `${total} batch`;
+                    })()}
+                  </span>
+                </div>
+              )}
+
               <div className="table-responsive">
                 <table className="data-table">
                   <thead>
@@ -2261,7 +2379,11 @@ function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {stageSummary?.batches?.map(b => {
+                    {stageSummary?.batches?.filter(b => {
+                      const matchSearch = b.name.toLowerCase().includes(baSearchTerm.toLowerCase());
+                      const matchStatus = baFilterStatus === 'all' || (baFilterStatus === 'published' && b.is_published) || (baFilterStatus === 'unpublished' && !b.is_published);
+                      return matchSearch && matchStatus;
+                    }).map(b => {
                       const isExpanded = expandedBatchId === b.id;
                       const breakdown = batchBreakdownCache[b.id] || [];
                       return (
@@ -2367,6 +2489,17 @@ function App() {
                       <tr>
                         <td colSpan="8" style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
                           Belum ada batch verifikasi yang diunggah. Buka menu Unggah Data untuk menambahkan.
+                        </td>
+                      </tr>
+                    )}
+                    {stageSummary?.batches?.length > 0 && stageSummary.batches.filter(b => {
+                      const matchSearch = b.name.toLowerCase().includes(baSearchTerm.toLowerCase());
+                      const matchStatus = baFilterStatus === 'all' || (baFilterStatus === 'published' && b.is_published) || (baFilterStatus === 'unpublished' && !b.is_published);
+                      return matchSearch && matchStatus;
+                    }).length === 0 && (
+                      <tr>
+                        <td colSpan="8" style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+                          Tidak ada batch yang cocok dengan filter.
                         </td>
                       </tr>
                     )}
@@ -3465,13 +3598,45 @@ function App() {
 
                 <div className="form-group" style={{ margin: '16px 0' }}>
                   <label className="form-label">Pilih Berkas Excel (.xlsx)</label>
-                  <input 
-                    type="file" 
-                    accept=".xlsx" 
-                    onChange={handleFileChange}
-                    style={{ padding: '8px' }}
-                    required
-                  />
+                  <div
+                    className={`dropzone ${isDragOver ? 'drag-over' : ''} ${selectedFile ? 'file-selected' : ''}`}
+                    onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+                    onDragLeave={() => setIsDragOver(false)}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setIsDragOver(false);
+                      const file = e.dataTransfer.files[0];
+                      if (file && file.name.endsWith('.xlsx')) {
+                        setSelectedFile(file);
+                      } else {
+                        showToast('Hanya file .xlsx yang diterima', 'error');
+                      }
+                    }}
+                    onClick={() => document.getElementById('upload-file-input').click()}
+                  >
+                    <input
+                      id="upload-file-input"
+                      type="file"
+                      accept=".xlsx"
+                      onChange={handleFileChange}
+                      style={{ display: 'none' }}
+                      required
+                    />
+                    {selectedFile ? (
+                      <>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--success)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                        <span className="dropzone-filename">{selectedFile.name}</span>
+                        <span className="dropzone-size">{(selectedFile.size / 1024).toFixed(1)} KB</span>
+                        <span className="dropzone-hint">Klik untuk ganti file</span>
+                      </>
+                    ) : (
+                      <>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                        <span className="dropzone-text">Seret file Excel ke sini atau <strong>klik untuk memilih</strong></span>
+                        <span className="dropzone-hint">Format: .xlsx (maksimal 1 file)</span>
+                      </>
+                    )}
+                  </div>
                   <small style={{ color: 'var(--text-muted)' }}>
                     Sistem akan memvalidasi kolom wajib secara otomatis sebelum berkas dikirim ke server.
                   </small>
@@ -3822,6 +3987,9 @@ function App() {
                         {skDirjenRekapPerKab.batch_id === null && (
                           <th rowSpan="2" className="header-selisih">SELISIH SK</th>
                         )}
+                        {skDirjenRekapPerKab.batch_id === null && (
+                          <th rowSpan="2" className="header-sumber">SUMBER SELISIH</th>
+                        )}
                       </tr>
                       <tr>
                         {skDirjenRekapPerKab.invers_stages.map(s => (
@@ -3846,6 +4014,28 @@ function App() {
                           {skDirjenRekapPerKab.batch_id === null && (
                             <td style={{ fontWeight: 600, color: row.selisih_sk > 0 ? '#10b981' : row.selisih_sk < 0 ? '#ef4444' : '#6b7280' }} className="rekap-digit">
                               {row.selisih_sk > 0 ? '+' : ''}{row.selisih_sk}
+                            </td>
+                          )}
+                          {skDirjenRekapPerKab.batch_id === null && (
+                            <td className="col-sumber">
+                              {row.sumber_selisih?.length > 0 ? (
+                                <button
+                                  className="sumber-selisih-trigger"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSumberSelisihPopup(sumberSelisihPopup?.kabupaten === row.kabupaten ? null : {
+                                      kabupaten: row.kabupaten,
+                                      selisih: row.selisih_sk,
+                                      data: row.sumber_selisih
+                                    });
+                                  }}
+                                  title="Klik untuk lihat rincian"
+                                >
+                                  {row.sumber_selisih.length} sumber
+                                </button>
+                              ) : (
+                                <span style={{ color: '#94a3b8' }}>-</span>
+                              )}
                             </td>
                           )}
                         </tr>
@@ -3875,6 +4065,9 @@ function App() {
                             </td>
                           );
                         })()}
+                        {skDirjenRekapPerKab.batch_id === null && (
+                          <td style={{ color: '#94a3b8', fontSize: '0.8rem' }}></td>
+                        )}
                       </tr>
                     </tfoot>
                   </table>
@@ -3885,6 +4078,44 @@ function App() {
                 <div style={{ textAlign: 'center', color: '#94a3b8', padding: '40px' }}>Pilih batch SK Dirjen untuk melihat rekap per kabupaten</div>
               )}
             </div>
+            )}
+
+            {/* Floating Window: Sumber Selisih */}
+            {sumberSelisihPopup && (
+              <div className="sumber-selisih-overlay" onClick={() => setSumberSelisihPopup(null)}>
+                <div className="sumber-selisih-popup" onClick={(e) => e.stopPropagation()}>
+                  <div className="sumber-selisih-header">
+                    <div>
+                      <strong>Sumber Selisih</strong>
+                      <span style={{ marginLeft: '8px', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                        {sumberSelisihPopup.kabupaten}
+                      </span>
+                    </div>
+                    <span className="sumber-selisih-badge" style={{
+                      background: sumberSelisihPopup.selisih > 0 ? 'var(--success-light)' : 'var(--danger-light)',
+                      color: sumberSelisihPopup.selisih > 0 ? 'var(--success)' : 'var(--danger)'
+                    }}>
+                      {sumberSelisihPopup.selisih > 0 ? '+' : ''}{sumberSelisihPopup.selisih} PB
+                    </span>
+                    <button className="sumber-selisih-close" onClick={() => setSumberSelisihPopup(null)}>&times;</button>
+                  </div>
+                  <div className="sumber-selisih-body">
+                    <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '12px' }}>
+                      Data CPB lolos yang belum terdokumentasi di SK Dirjen:
+                    </p>
+                    {sumberSelisihPopup.data.map((item, idx) => (
+                      <div key={idx} className="sumber-selisih-item">
+                        <span className="sumber-selisih-num">{idx + 1}.</span>
+                        <div className="sumber-selisih-info">
+                          <span className="sumber-selisih-batch">{item.batch_name}</span>
+                          <span className="sumber-selisih-stage">{item.stage_name}</span>
+                        </div>
+                        <span className="sumber-selisih-count">{item.cnt} PB</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
             )}
           </div>
         )}
@@ -4199,13 +4430,14 @@ function App() {
             )}
 
             {!rekapLoading && rekapData && rekapData.stages.length > 0 && (() => {
-              const sortedRekapStages = [...rekapData.stages].sort((a, b) => {
-                const numA = parseInt(a.stage_name.replace(/\D/g, '')) || 0;
-                const numB = parseInt(b.stage_name.replace(/\D/g, '')) || 0;
-                return numA - numB;
-              });
-              const murniStages = sortedRekapStages.filter(s => s.stage_type !== 'pengganti');
-              const penggantiStages = sortedRekapStages.filter(s => s.stage_type === 'pengganti');
+              const allStages = [...rekapData.stages];
+              const murniStages = allStages
+                .filter(s => s.stage_type !== 'pengganti')
+                .sort((a, b) => (parseInt(a.stage_name.replace(/\D/g, '')) || 0) - (parseInt(b.stage_name.replace(/\D/g, '')) || 0));
+              const penggantiStages = allStages
+                .filter(s => s.stage_type === 'pengganti')
+                .sort((a, b) => (parseInt(a.stage_name.replace(/\D/g, '')) || 0) - (parseInt(b.stage_name.replace(/\D/g, '')) || 0));
+              const sortedRekapStages = [...murniStages, ...penggantiStages];
 
               const renderRekapTable = (groupStages, label) => {
                 if (groupStages.length === 0) return null;
@@ -4400,13 +4632,14 @@ function App() {
             )}
 
             {!rekapLoading && rekapUnggahanData && rekapUnggahanData.stages.length > 0 && (() => {
-              const sortedRekapStages = [...rekapUnggahanData.stages].sort((a, b) => {
-                const numA = parseInt(a.stage_name.replace(/\D/g, '')) || 0;
-                const numB = parseInt(b.stage_name.replace(/\D/g, '')) || 0;
-                return numA - numB;
-              });
-              const murniStages = sortedRekapStages.filter(s => s.stage_type !== 'pengganti');
-              const penggantiStages = sortedRekapStages.filter(s => s.stage_type === 'pengganti');
+              const allStages = [...rekapUnggahanData.stages];
+              const murniStages = allStages
+                .filter(s => s.stage_type !== 'pengganti')
+                .sort((a, b) => (parseInt(a.stage_name.replace(/\D/g, '')) || 0) - (parseInt(b.stage_name.replace(/\D/g, '')) || 0));
+              const penggantiStages = allStages
+                .filter(s => s.stage_type === 'pengganti')
+                .sort((a, b) => (parseInt(a.stage_name.replace(/\D/g, '')) || 0) - (parseInt(b.stage_name.replace(/\D/g, '')) || 0));
+              const sortedRekapStages = [...murniStages, ...penggantiStages];
 
               const renderRekapTable = (groupStages, label) => {
                 if (groupStages.length === 0) return null;
