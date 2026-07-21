@@ -2233,7 +2233,9 @@ def export_rekap_keseluruhan():
         return int(match.group()) if match else 999
     all_stages = sorted(all_stages, key=get_stage_num)
     
-    cursor.execute("""
+    published_filter = "AND vb.is_published = 1"
+    
+    cursor.execute(f"""
         SELECT DISTINCT UPPER(TRIM(COALESCE(kabupaten_kota, ''))) as kab 
         FROM invers_records ir
         JOIN invers_revisions irv ON ir.revision_id = irv.id
@@ -2244,9 +2246,32 @@ def export_rekap_keseluruhan():
         JOIN verified_batches vb ON vr.batch_id = vb.id
         LEFT JOIN reconciliation_overrides ro ON ro.original_no_ktp = vr.no_ktp AND ro.stage_id = vb.stage_id
         WHERE (vr.is_duplicate_in_previous = 0 OR ro.id IS NOT NULL) AND TRIM(COALESCE(vr.kabupaten_kota, '')) != ''
+        {published_filter}
         ORDER BY kab ASC
     """)
     all_kabupaten = [r['kab'] for r in cursor.fetchall()]
+    
+    cursor.execute("""
+        SELECT 
+            m.verified_stage_id as stage_id,
+            UPPER(TRIM(COALESCE(vr.kabupaten_kota, ''))) as kab,
+            COUNT(*) as cnt
+        FROM sk_dirjen_matches m
+        JOIN verified_records vr ON vr.id = m.verified_record_id
+        WHERE m.verified_stage_id IS NOT NULL
+        AND m.verified_record_id IS NOT NULL
+        AND (m.match_type = 'PERFECT' 
+            OR (m.match_type = 'NEEDS_APPROVAL' AND m.override_status = 'APPROVED')
+            OR m.match_type = 'MANUAL_PAIR')
+        GROUP BY m.verified_stage_id, kab
+    """)
+    sk_by_stage_kab = {}
+    for row in cursor.fetchall():
+        sid = row['stage_id']
+        kab = row['kab']
+        if sid not in sk_by_stage_kab:
+            sk_by_stage_kab[sid] = {}
+        sk_by_stage_kab[sid][kab] = row['cnt']
     
     stages_data = []
     
@@ -2262,12 +2287,13 @@ def export_rekap_keseluruhan():
         """, (stage_id,))
         invers_recs = [dict(r) for r in cursor.fetchall()]
         
-        cursor.execute("""
+        cursor.execute(f"""
             SELECT vr.no_ktp, vr.status, UPPER(TRIM(COALESCE(vr.kabupaten_kota, ''))) as kab
             FROM verified_records vr
             JOIN verified_batches vb ON vr.batch_id = vb.id
             LEFT JOIN reconciliation_overrides ro ON ro.original_no_ktp = vr.no_ktp AND ro.stage_id = vb.stage_id
             WHERE vb.stage_id = ? AND (vr.is_duplicate_in_previous = 0 OR ro.id IS NOT NULL)
+            {published_filter}
         """, (stage_id,))
         verified_recs = [dict(r) for r in cursor.fetchall()]
         
@@ -2286,7 +2312,11 @@ def export_rekap_keseluruhan():
             else:
                 verif_by_kab[kab]['tidak_lolos'] += 1
                 
+        sk_data = sk_by_stage_kab.get(stage_id, {})
+        
         kab_data = {}
+        total_sk_sudah = 0
+        total_sk_belum = 0
         for kab in all_kabupaten:
             alokasi = alokasi_by_kab.get(kab, 0)
             lolos = verif_by_kab.get(kab, {}).get('lolos', 0)
@@ -2294,12 +2324,19 @@ def export_rekap_keseluruhan():
             verifikasi = lolos + tidak_lolos
             belum = max(0, alokasi - verifikasi)
             
+            sk_sudah = sk_data.get(kab, 0)
+            sk_belum = max(0, lolos - sk_sudah)
+            total_sk_sudah += sk_sudah
+            total_sk_belum += sk_belum
+            
             kab_data[kab] = {
                 "alokasi": alokasi,
                 "verifikasi": verifikasi,
                 "lolos": lolos,
                 "tidak_lolos": tidak_lolos,
-                "belum": belum
+                "belum": belum,
+                "sk_dirjen_sudah": sk_sudah,
+                "sk_dirjen_belum": sk_belum
             }
             
         stages_data.append({
@@ -2308,7 +2345,9 @@ def export_rekap_keseluruhan():
             "totals": {
                 "alokasi": sum(alokasi_by_kab.values()),
                 "lolos": sum(x['lolos'] for x in verif_by_kab.values()),
-                "tidak_lolos": sum(x['tidak_lolos'] for x in verif_by_kab.values())
+                "tidak_lolos": sum(x['tidak_lolos'] for x in verif_by_kab.values()),
+                "sk_dirjen_sudah": total_sk_sudah,
+                "sk_dirjen_belum": total_sk_belum
             }
         })
     
@@ -2350,9 +2389,14 @@ def export_rekap_keseluruhan():
         right=Side(style='thin', color='D3D3D3')
     )
 
+    fill_sk_sudah = PatternFill(start_color='D5F5E3', end_color='D5F5E3', fill_type='solid')
+    fill_sk_belum = PatternFill(start_color='EAECEE', end_color='EAECEE', fill_type='solid')
+    font_sk_sudah = Font(name='Segoe UI', size=9, bold=True, color='1E8449')
+    font_sk_belum = Font(name='Segoe UI', size=9, bold=True, color='7F8C8D')
+
     align_center = Alignment(horizontal='center', vertical='center', wrap_text=True)
     align_left = Alignment(horizontal='left', vertical='center')
-    sub_headers = ["ALOKASI", "VERIFIKASI", "LOLOS", "TIDAK LOLOS", "BELUM"]
+    sub_headers = ["ALOKASI", "VERIFIKASI", "LOLOS", "TIDAK LOLOS", "BELUM", "SUDAH", "BELUM"]
 
     def build_worksheet(ws, title, subtitle, group_stages):
         ws['A1'] = title
@@ -2373,30 +2417,44 @@ def export_rekap_keseluruhan():
         ws.cell(row=4, column=3, value="REKAP TOTAL").font = font_header
         ws.cell(row=4, column=3).fill = fill_title_group
         ws.cell(row=4, column=3).alignment = align_center
-        ws.merge_cells(start_row=4, start_column=3, end_row=4, end_column=7)
+        ws.merge_cells(start_row=4, start_column=3, end_row=4, end_column=9)
 
-        col_idx = 8
+        col_idx = 10
         for stage in group_stages:
             ws.cell(row=4, column=col_idx, value=stage['stage_name'].upper()).font = font_header
             ws.cell(row=4, column=col_idx).fill = fill_stage_group
             ws.cell(row=4, column=col_idx).alignment = align_center
-            ws.merge_cells(start_row=4, start_column=col_idx, end_row=4, end_column=col_idx+4)
-            col_idx += 5
+            ws.merge_cells(start_row=4, start_column=col_idx, end_row=4, end_column=col_idx+6)
+            col_idx += 7
 
         for i, sh in enumerate(sub_headers):
             cell = ws.cell(row=5, column=3+i, value=sh)
             cell.font = font_sub_header
             cell.alignment = align_center
-            cell.fill = PatternFill(start_color='D4E2EE', end_color='D4E2EE', fill_type='solid')
+            if sh == "SUDAH":
+                cell.fill = fill_sk_sudah
+                cell.font = font_sk_sudah
+            elif sh == "BELUM" and i == 6:
+                cell.fill = fill_sk_belum
+                cell.font = font_sk_belum
+            else:
+                cell.fill = PatternFill(start_color='D4E2EE', end_color='D4E2EE', fill_type='solid')
 
-        col_idx = 8
+        col_idx = 10
         for stage in group_stages:
             for i, sh in enumerate(sub_headers):
                 cell = ws.cell(row=5, column=col_idx+i, value=sh)
                 cell.font = font_sub_header
                 cell.alignment = align_center
-                cell.fill = PatternFill(start_color='E8F0F8', end_color='E8F0F8', fill_type='solid')
-            col_idx += 5
+                if sh == "SUDAH":
+                    cell.fill = fill_sk_sudah
+                    cell.font = font_sk_sudah
+                elif sh == "BELUM" and i == 6:
+                    cell.fill = fill_sk_belum
+                    cell.font = font_sk_belum
+                else:
+                    cell.fill = PatternFill(start_color='E8F0F8', end_color='E8F0F8', fill_type='solid')
+            col_idx += 7
 
         row_idx = 6
         for idx, kab in enumerate(all_kabupaten):
@@ -2409,39 +2467,56 @@ def export_rekap_keseluruhan():
             sum_l = sum(s['data'].get(kab, {}).get('lolos', 0) for s in group_stages)
             sum_tl = sum(s['data'].get(kab, {}).get('tidak_lolos', 0) for s in group_stages)
             sum_b = sum(s['data'].get(kab, {}).get('belum', 0) for s in group_stages)
+            sum_sks = sum(s['data'].get(kab, {}).get('sk_dirjen_sudah', 0) for s in group_stages)
+            sum_skb = sum(s['data'].get(kab, {}).get('sk_dirjen_belum', 0) for s in group_stages)
 
             ws.cell(row=row_idx, column=3, value=sum_a).font = font_total
             ws.cell(row=row_idx, column=4, value=sum_v).font = font_total
             ws.cell(row=row_idx, column=5, value=sum_l).font = font_total
             ws.cell(row=row_idx, column=6, value=sum_tl).font = font_total
             ws.cell(row=row_idx, column=7, value=sum_b).font = font_total
+            ws.cell(row=row_idx, column=8, value=sum_sks).font = font_sk_sudah
+            ws.cell(row=row_idx, column=9, value=sum_skb).font = font_sk_belum
 
-            for c in range(3, 8):
+            for c in range(3, 10):
                 cell = ws.cell(row=row_idx, column=c)
-                cell.fill = fill_summary_col
+                if c == 8:
+                    cell.fill = fill_sk_sudah
+                elif c == 9:
+                    cell.fill = fill_sk_belum
+                else:
+                    cell.fill = fill_summary_col
                 cell.alignment = align_center
-                if c == 7:
+                if c == 9:
                     cell.border = border_thick_right
                 else:
                     cell.border = border_thin
 
-            col_idx = 8
+            col_idx = 10
             for stage in group_stages:
-                kd = stage["data"].get(kab, {"alokasi": 0, "verifikasi": 0, "lolos": 0, "tidak_lolos": 0, "belum": 0})
+                kd = stage["data"].get(kab, {"alokasi": 0, "verifikasi": 0, "lolos": 0, "tidak_lolos": 0, "belum": 0, "sk_dirjen_sudah": 0, "sk_dirjen_belum": 0})
                 ws.cell(row=row_idx, column=col_idx, value=kd["alokasi"] or "-").alignment = align_center
                 ws.cell(row=row_idx, column=col_idx+1, value=kd["verifikasi"] or "-").alignment = align_center
                 ws.cell(row=row_idx, column=col_idx+2, value=kd["lolos"] or "-").alignment = align_center
                 ws.cell(row=row_idx, column=col_idx+3, value=kd["tidak_lolos"] or "-").alignment = align_center
                 ws.cell(row=row_idx, column=col_idx+4, value=kd["belum"] or "-").alignment = align_center
+                ws.cell(row=row_idx, column=col_idx+5, value=kd.get("sk_dirjen_sudah", 0) or "-").alignment = align_center
+                ws.cell(row=row_idx, column=col_idx+6, value=kd.get("sk_dirjen_belum", 0) or "-").alignment = align_center
 
-                for offset in range(5):
+                for offset in range(7):
                     cell = ws.cell(row=row_idx, column=col_idx+offset)
                     cell.font = font_data
-                    if offset == 4:
+                    if offset == 5:
+                        cell.fill = fill_sk_sudah
+                        cell.font = font_sk_sudah
+                    elif offset == 6:
+                        cell.fill = fill_sk_belum
+                        cell.font = font_sk_belum
+                    if offset == 6:
                         cell.border = border_thick_right
                     else:
                         cell.border = border_thin
-                col_idx += 5
+                col_idx += 7
 
             ws.cell(row=row_idx, column=1).border = border_thin
             ws.cell(row=row_idx, column=2).border = border_thin
@@ -2459,37 +2534,53 @@ def export_rekap_keseluruhan():
         tot_l = sum(sum(s['data'].get(kab, {}).get('lolos', 0) for s in group_stages) for kab in all_kabupaten)
         tot_tl = sum(sum(s['data'].get(kab, {}).get('tidak_lolos', 0) for s in group_stages) for kab in all_kabupaten)
         tot_b = sum(sum(s['data'].get(kab, {}).get('belum', 0) for s in group_stages) for kab in all_kabupaten)
+        tot_sks = sum(sum(s['data'].get(kab, {}).get('sk_dirjen_sudah', 0) for s in group_stages) for kab in all_kabupaten)
+        tot_skb = sum(sum(s['data'].get(kab, {}).get('sk_dirjen_belum', 0) for s in group_stages) for kab in all_kabupaten)
 
-        total_vals = [tot_a, tot_v, tot_l, tot_tl, tot_b]
+        total_vals = [tot_a, tot_v, tot_l, tot_tl, tot_b, tot_sks, tot_skb]
         for i, val in enumerate(total_vals):
             cell = ws.cell(row=row_idx, column=3+i, value=val)
             cell.font = font_total
             cell.alignment = align_center
             cell.fill = fill_total_row
-            if i == 4:
+            if i == 5:
+                cell.fill = fill_sk_sudah
+                cell.font = Font(name='Segoe UI', size=9, bold=True, color='1E8449')
+            elif i == 6:
+                cell.fill = fill_sk_belum
+                cell.font = Font(name='Segoe UI', size=9, bold=True, color='7F8C8D')
+            if i == 6:
                 cell.border = Border(top=Side(style='double', color='2C3E50'), bottom=Side(style='thin', color='D3D3D3'), right=Side(style='medium', color='7F8C8D'))
             else:
                 cell.border = border_double_top
 
-        col_idx = 8
+        col_idx = 10
         for stage in group_stages:
             st_a = sum(kd["alokasi"] for kd in stage["data"].values())
             st_v = sum(kd["verifikasi"] for kd in stage["data"].values())
             st_l = sum(kd["lolos"] for kd in stage["data"].values())
             st_tl = sum(kd["tidak_lolos"] for kd in stage["data"].values())
             st_b = sum(kd["belum"] for kd in stage["data"].values())
+            st_sks = sum(kd.get("sk_dirjen_sudah", 0) for kd in stage["data"].values())
+            st_skb = sum(kd.get("sk_dirjen_belum", 0) for kd in stage["data"].values())
 
-            vals = [st_a, st_v, st_l, st_tl, st_b]
+            vals = [st_a, st_v, st_l, st_tl, st_b, st_sks, st_skb]
             for i, val in enumerate(vals):
                 cell = ws.cell(row=row_idx, column=col_idx+i, value=val)
                 cell.font = font_total
                 cell.alignment = align_center
                 cell.fill = fill_total_row
-                if i == 4:
+                if i == 5:
+                    cell.fill = fill_sk_sudah
+                    cell.font = Font(name='Segoe UI', size=9, bold=True, color='1E8449')
+                elif i == 6:
+                    cell.fill = fill_sk_belum
+                    cell.font = Font(name='Segoe UI', size=9, bold=True, color='7F8C8D')
+                if i == 6:
                     cell.border = Border(top=Side(style='double', color='2C3E50'), bottom=Side(style='thin', color='D3D3D3'), right=Side(style='medium', color='7F8C8D'))
                 else:
                     cell.border = border_double_top
-            col_idx += 5
+            col_idx += 7
 
         for col in ws.columns:
             max_len = 0
@@ -2509,6 +2600,9 @@ def export_rekap_keseluruhan():
 
     ws_pengganti = wb.create_sheet("Rekap Invers Pengganti")
     build_worksheet(ws_pengganti, "REKAPITULASI INVERS PENGGANTI", "Sistem Verifikasi Perumahan Swadaya — Tahap Invers Pengganti", pengganti_stages)
+
+    ws_keseluruhan = wb.create_sheet("Rekap Keseluruhan")
+    build_worksheet(ws_keseluruhan, "REKAPITULASI KESELURUHAN INVERS", "Sistem Verifikasi Perumahan Swadaya — Semua Tahap", stages_data)
 
     file_stream = io.BytesIO()
     wb.save(file_stream)
@@ -2554,6 +2648,29 @@ def get_rekap_keseluruhan(published_only: int = 0):
         ORDER BY kab ASC
     """)
     all_kabupaten = [r['kab'] for r in cursor.fetchall()]
+    
+    # Pre-fetch SK Dirjen match counts per stage per kabupaten
+    cursor.execute("""
+        SELECT 
+            m.verified_stage_id as stage_id,
+            UPPER(TRIM(COALESCE(vr.kabupaten_kota, ''))) as kab,
+            COUNT(*) as cnt
+        FROM sk_dirjen_matches m
+        JOIN verified_records vr ON vr.id = m.verified_record_id
+        WHERE m.verified_stage_id IS NOT NULL
+        AND m.verified_record_id IS NOT NULL
+        AND (m.match_type = 'PERFECT' 
+            OR (m.match_type = 'NEEDS_APPROVAL' AND m.override_status = 'APPROVED')
+            OR m.match_type = 'MANUAL_PAIR')
+        GROUP BY m.verified_stage_id, kab
+    """)
+    sk_by_stage_kab = {}
+    for row in cursor.fetchall():
+        sid = row['stage_id']
+        kab = row['kab']
+        if sid not in sk_by_stage_kab:
+            sk_by_stage_kab[sid] = {}
+        sk_by_stage_kab[sid][kab] = row['cnt']
     
     stages_data = []
     
@@ -2610,6 +2727,10 @@ def get_rekap_keseluruhan(published_only: int = 0):
         total_lolos = 0
         total_tidak_lolos = 0
         total_belum = 0
+        total_sk_sudah = 0
+        total_sk_belum = 0
+        
+        sk_data = sk_by_stage_kab.get(stage_id, {})
         
         for kab in all_kabupaten:
             alokasi = alokasi_by_kab.get(kab, 0)
@@ -2618,11 +2739,16 @@ def get_rekap_keseluruhan(published_only: int = 0):
             verifikasi = lolos + tidak_lolos
             belum = max(0, alokasi - verifikasi)
             
+            sk_sudah = sk_data.get(kab, 0)
+            sk_belum = max(0, lolos - sk_sudah)
+            
             total_alokasi += alokasi
             total_verifikasi += verifikasi
             total_lolos += lolos
             total_tidak_lolos += tidak_lolos
             total_belum += belum
+            total_sk_sudah += sk_sudah
+            total_sk_belum += sk_belum
             
             kab_data.append({
                 "kabupaten": kab,
@@ -2630,7 +2756,9 @@ def get_rekap_keseluruhan(published_only: int = 0):
                 "verifikasi": verifikasi,
                 "lolos": lolos,
                 "tidak_lolos": tidak_lolos,
-                "belum_verifikasi": belum
+                "belum_verifikasi": belum,
+                "sk_dirjen_sudah": sk_sudah,
+                "sk_dirjen_belum": sk_belum
             })
         
         # Progress bar segments for this stage
@@ -2645,7 +2773,9 @@ def get_rekap_keseluruhan(published_only: int = 0):
                 "verifikasi": total_verifikasi,
                 "lolos": total_lolos,
                 "tidak_lolos": total_tidak_lolos,
-                "belum_verifikasi": total_belum
+                "belum_verifikasi": total_belum,
+                "sk_dirjen_sudah": total_sk_sudah,
+                "sk_dirjen_belum": total_sk_belum
             }
         })
     
@@ -3346,7 +3476,7 @@ async def upload_sk_dirjen(
         cursor.execute("""
             SELECT vr.id, vr.nama, vr.no_ktp, vr.no_kk 
             FROM verified_records vr
-            WHERE vr.no_ktp = ?
+            WHERE vr.no_ktp = ? AND vr.status = 'LOLOS'
             ORDER BY (SELECT id FROM verified_batches WHERE id = vr.batch_id) DESC NULLS LAST
             LIMIT 1
         """, (nik,))
@@ -3430,23 +3560,23 @@ def search_verified_for_pairing(q: str = "", desa: str = ""):
         desa_term = f"%{desa.upper().strip()}%"
         cursor.execute("""
             SELECT vr.id, vr.nama, vr.no_ktp, vr.no_kk, vr.desa_kelurahan, 
-                   vr.kecamatan, vr.kabupaten_kota, vb.name as batch_name, ist.name as tahap
+                   vr.kecamatan, vr.kabupaten_kota, vr.status, vb.name as batch_name, ist.name as tahap
             FROM verified_records vr
             JOIN verified_batches vb ON vb.id = vr.batch_id
             JOIN invers_stages ist ON ist.id = vb.stage_id
-            WHERE UPPER(vr.nama) LIKE ? AND UPPER(vr.desa_kelurahan) LIKE ?
+            WHERE UPPER(vr.nama) LIKE ? AND UPPER(vr.desa_kelurahan) LIKE ? AND vr.status = 'LOLOS'
             ORDER BY vr.nama
             LIMIT 20
         """, (term, desa_term))
     else:
         cursor.execute("""
             SELECT vr.id, vr.nama, vr.no_ktp, vr.no_kk, vr.desa_kelurahan, 
-                   vr.kecamatan, vr.kabupaten_kota, vb.name as batch_name, ist.name as tahap
+                   vr.kecamatan, vr.kabupaten_kota, vr.status, vb.name as batch_name, ist.name as tahap
             FROM verified_records vr
             JOIN verified_batches vb ON vb.id = vr.batch_id
             JOIN invers_stages ist ON ist.id = vb.stage_id
-            WHERE UPPER(vr.nama) LIKE ? OR vr.no_ktp LIKE ? OR vr.no_kk LIKE ?
-                   OR UPPER(vr.desa_kelurahan) LIKE ?
+            WHERE (UPPER(vr.nama) LIKE ? OR vr.no_ktp LIKE ? OR vr.no_kk LIKE ?
+                   OR UPPER(vr.desa_kelurahan) LIKE ?) AND vr.status = 'LOLOS'
             ORDER BY vr.nama
             LIMIT 20
         """, (term, term, term, term))
@@ -3469,10 +3599,14 @@ def pair_sk_dirjen_record(sk_record_id: int, body: dict = Body(...)):
         conn.close()
         raise HTTPException(status_code=404, detail="Record SK Dirjen tidak ditemukan")
     
-    cursor.execute("SELECT id FROM verified_records WHERE id = ?", (verified_record_id,))
-    if not cursor.fetchone():
+    cursor.execute("SELECT id, status FROM verified_records WHERE id = ?", (verified_record_id,))
+    vr_check = cursor.fetchone()
+    if not vr_check:
         conn.close()
         raise HTTPException(status_code=404, detail="Record Terverifikasi tidak ditemukan")
+    if vr_check['status'] != 'LOLOS':
+        conn.close()
+        raise HTTPException(status_code=400, detail="Hanya bisa memasangkan dengan record yang LOLOS")
     
     cursor.execute("""
         SELECT vb.id as vb_id, vb.stage_id as vs_id
@@ -3499,13 +3633,16 @@ def pair_sk_dirjen_record(sk_record_id: int, body: dict = Body(...)):
     return {"success": True, "message": "Berhasil memasangkan data"}
 
 @app.get("/api/sk-dirjen/{batch_id}/records")
-def get_sk_dirjen_records(batch_id: int, kabupaten: str = None, kecamatan: str = None, desa: str = None, tahap: str = None, status: str = None):
+def get_sk_dirjen_records(batch_id: int, kabupaten: str = None, kecamatan: str = None, desa: str = None, tahap: str = None, status: str = None, q: str = None, asal_batch: str = None):
     conn = get_db_connection()
     cursor = conn.cursor()
     
     query = """
         SELECT r.*, m.match_type, m.override_status, m.verified_record_id, m.verified_batch_id, m.verified_stage_id,
-            COALESCE(vb.name, vb2.name) as verified_batch_name, COALESCE(ist.name, ist2.name) as verified_stage_name
+            COALESCE(vb.name, vb2.name) as verified_batch_name, COALESCE(ist.name, ist2.name) as verified_stage_name,
+            vr.nama as verified_nama, vr.no_ktp as verified_no_ktp, vr.no_kk as verified_no_kk,
+            vr.alamat as verified_alamat, vr.desa_kelurahan as verified_desa_kelurahan,
+            vr.kecamatan as verified_kecamatan, vr.kabupaten_kota as verified_kabupaten_kota
         FROM sk_dirjen_records r
         LEFT JOIN sk_dirjen_matches m ON m.sk_record_id = r.id
         LEFT JOIN verified_batches vb ON vb.id = m.verified_batch_id
@@ -3516,6 +3653,11 @@ def get_sk_dirjen_records(batch_id: int, kabupaten: str = None, kecamatan: str =
         WHERE r.batch_id = ?
     """
     params = [batch_id]
+    
+    if q and q.strip():
+        search = f"%{q.strip().upper()}%"
+        query += " AND (UPPER(r.nama) LIKE ? OR r.no_ktp LIKE ? OR r.no_kk LIKE ? OR UPPER(r.desa_kelurahan) LIKE ? OR UPPER(r.kecamatan) LIKE ? OR UPPER(r.kabupaten_kota) LIKE ?)"
+        params.extend([search, search, search, search, search, search])
     
     if kabupaten:
         query += " AND UPPER(r.kabupaten_kota) = ?"
@@ -3529,6 +3671,9 @@ def get_sk_dirjen_records(batch_id: int, kabupaten: str = None, kecamatan: str =
     if tahap:
         query += " AND UPPER(ist.name) = ?"
         params.append(tahap.upper())
+    if asal_batch:
+        query += " AND UPPER(COALESCE(vb.name, vb2.name)) = ?"
+        params.append(asal_batch.upper())
     if status:
         if status == 'PERFECT':
             query += " AND m.match_type = 'PERFECT'"
@@ -3542,6 +3687,69 @@ def get_sk_dirjen_records(batch_id: int, kabupaten: str = None, kecamatan: str =
             query += " AND m.match_type = 'MANUAL_PAIR'"
     
     query += " ORDER BY r.no_urut, r.id"
+    cursor.execute(query, params)
+    records = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return {"records": records}
+
+@app.get("/api/sk-dirjen/all-records")
+def get_sk_dirjen_all_records(q: str = None, kabupaten: str = None, kecamatan: str = None, desa: str = None, status: str = None, tahap: str = None, asal_batch: str = None):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    query = """
+        SELECT r.*, m.match_type, m.override_status, m.verified_record_id, m.verified_batch_id, m.verified_stage_id,
+            COALESCE(vb.name, vb2.name) as verified_batch_name, COALESCE(ist.name, ist2.name) as verified_stage_name,
+            vr.nama as verified_nama, vr.no_ktp as verified_no_ktp, vr.no_kk as verified_no_kk,
+            vr.alamat as verified_alamat, vr.desa_kelurahan as verified_desa_kelurahan,
+            vr.kecamatan as verified_kecamatan, vr.kabupaten_kota as verified_kabupaten_kota,
+            sb.stage_name as batch_stage_name
+        FROM sk_dirjen_records r
+        JOIN sk_dirjen_batches sb ON sb.id = r.batch_id
+        LEFT JOIN sk_dirjen_matches m ON m.sk_record_id = r.id
+        LEFT JOIN verified_batches vb ON vb.id = m.verified_batch_id
+        LEFT JOIN invers_stages ist ON ist.id = m.verified_stage_id
+        LEFT JOIN verified_records vr ON vr.id = m.verified_record_id
+        LEFT JOIN verified_batches vb2 ON vb2.id = vr.batch_id
+        LEFT JOIN invers_stages ist2 ON ist2.id = vb2.stage_id
+        WHERE 1=1
+    """
+    params = []
+    
+    if q and q.strip():
+        search = f"%{q.strip().upper()}%"
+        query += " AND (UPPER(r.nama) LIKE ? OR r.no_ktp LIKE ? OR r.no_kk LIKE ? OR UPPER(r.desa_kelurahan) LIKE ? OR UPPER(r.kecamatan) LIKE ? OR UPPER(r.kabupaten_kota) LIKE ?)"
+        params.extend([search, search, search, search, search, search])
+    
+    if kabupaten:
+        query += " AND UPPER(r.kabupaten_kota) = ?"
+        params.append(kabupaten.upper())
+    if kecamatan:
+        query += " AND UPPER(r.kecamatan) = ?"
+        params.append(kecamatan.upper())
+    if desa:
+        query += " AND UPPER(r.desa_kelurahan) = ?"
+        params.append(desa.upper())
+    if status:
+        if status == 'PERFECT':
+            query += " AND m.match_type = 'PERFECT'"
+        elif status == 'NEEDS_APPROVAL':
+            query += " AND m.match_type = 'NEEDS_APPROVAL'"
+        elif status == 'NO_MATCH':
+            query += " AND m.match_type = 'NO_MATCH'"
+        elif status == 'APPROVED':
+            query += " AND m.match_type = 'NEEDS_APPROVAL' AND m.override_status = 'APPROVED'"
+        elif status == 'MANUAL_PAIR':
+            query += " AND m.match_type = 'MANUAL_PAIR'"
+    
+    if tahap:
+        query += " AND UPPER(COALESCE(ist.name, ist2.name)) = ?"
+        params.append(tahap.upper())
+    if asal_batch:
+        query += " AND UPPER(COALESCE(vb.name, vb2.name)) = ?"
+        params.append(asal_batch.upper())
+    
+    query += " ORDER BY sb.id DESC, r.no_urut, r.id"
     cursor.execute(query, params)
     records = [dict(row) for row in cursor.fetchall()]
     conn.close()

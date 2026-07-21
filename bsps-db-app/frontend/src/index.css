@@ -2821,6 +2821,49 @@ body {
   background: var(--hover-bg);
 }
 
+/* SK Dirjen columns in Rekap Keseluruhan */
+.rekap-sub-skdirjen-sudah {
+  background: #f0fdf4 !important;
+  color: #166534 !important;
+  font-weight: 600;
+  font-size: 0.68rem;
+}
+
+.rekap-sub-skdirjen-belum {
+  background: #fef2f2 !important;
+  color: #991b1b !important;
+  font-weight: 600;
+  font-size: 0.68rem;
+}
+
+.rekap-cell-skdirjen {
+  text-align: center;
+}
+
+.sk-dirjen-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.sk-dirjen-badge.sudah {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.sk-dirjen-badge.belum {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.rekap-cell-skdirjen .sk-dirjen-badge {
+  font-size: 0.7rem;
+  padding: 1px 6px;
+}
+
 @media (max-width: 768px) {
   .global-summary-cards {
     grid-template-columns: repeat(2, 1fr);

@@ -373,12 +373,13 @@ function App() {
   const [skDirjenActiveSubTab, setSkDirjenActiveSubTab] = useState('daftar-pb');
   const [skDirjenSubmenuOpen, setSkDirjenSubmenuOpen] = useState(false);
   const [skDirjenBatches, setSkDirjenBatches] = useState([]);
-  const [skDirjenSelectedBatch, setSkDirjenSelectedBatch] = useState(null);
+  const [skDirjenSelectedBatch, setSkDirjenSelectedBatch] = useState('all');
   const [skDirjenRecords, setSkDirjenRecords] = useState([]);
   const [skDirjenFilterKab, setSkDirjenFilterKab] = useState('');
   const [skDirjenFilterKec, setSkDirjenFilterKec] = useState('');
   const [skDirjenFilterDesa, setSkDirjenFilterDesa] = useState('');
   const [skDirjenFilterTahap, setSkDirjenFilterTahap] = useState('');
+  const [skDirjenFilterAsalBatch, setSkDirjenFilterAsalBatch] = useState('');
   const [skDirjenFilterStatus, setSkDirjenFilterStatus] = useState('');
   const [skDirjenRekapPerTahap, setSkDirjenRekapPerTahap] = useState(null);
   const [skDirjenRekapPerKab, setSkDirjenRekapPerKab] = useState(null);
@@ -389,6 +390,8 @@ function App() {
   const [skDirjenPairingRecord, setSkDirjenPairingRecord] = useState(null);
   const [skDirjenPairSearchTerm, setSkDirjenPairSearchTerm] = useState('');
   const [skDirjenPairSearchResults, setSkDirjenPairSearchResults] = useState([]);
+  const [skDirjenSearchTerm, setSkDirjenSearchTerm] = useState('');
+  const [skDirjenDebouncedSearch, setSkDirjenDebouncedSearch] = useState('');
   const [sumberSelisihPopup, setSumberSelisihPopup] = useState(null);
   const [expandedSumber, setExpandedSumber] = useState(null);
   const [sumberDetail, setSumberDetail] = useState([]);
@@ -607,6 +610,40 @@ function App() {
       fetchGlobalSearch();
     }
   }, [globalPage]);
+
+  // Debounce search for SK Dirjen
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSkDirjenDebouncedSearch(skDirjenSearchTerm);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [skDirjenSearchTerm]);
+
+  useEffect(() => {
+    if (activeTab === 'sk-dirjen' && skDirjenSelectedBatch) {
+      if (skDirjenSelectedBatch === 'all') {
+        fetchSkDirjenAllRecords({
+          q: skDirjenDebouncedSearch,
+          kabupaten: skDirjenFilterKab,
+          kecamatan: skDirjenFilterKec,
+          desa: skDirjenFilterDesa,
+          tahap: skDirjenFilterTahap,
+          asal_batch: skDirjenFilterAsalBatch,
+          status: skDirjenFilterStatus
+        });
+      } else {
+        fetchSkDirjenRecords(skDirjenSelectedBatch, {
+          q: skDirjenDebouncedSearch,
+          kabupaten: skDirjenFilterKab,
+          kecamatan: skDirjenFilterKec,
+          desa: skDirjenFilterDesa,
+          tahap: skDirjenFilterTahap,
+          asal_batch: skDirjenFilterAsalBatch,
+          status: skDirjenFilterStatus
+        });
+      }
+    }
+  }, [skDirjenDebouncedSearch]);
 
   const handleStageSelect = (e) => {
     setSelectedStageId(e.target.value);
@@ -876,9 +913,8 @@ function App() {
       const res = await fetch(`${BACKEND_URL}/api/sk-dirjen/batches`);
       const data = await res.json();
       setSkDirjenBatches(data.batches);
-      if (data.batches.length > 0 && !skDirjenSelectedBatch) {
-        setSkDirjenSelectedBatch(data.batches[0].id);
-        fetchSkDirjenRecords(data.batches[0].id);
+      if (data.batches.length > 0 && skDirjenSelectedBatch === 'all' && skDirjenRecords.length === 0) {
+        fetchSkDirjenAllRecords();
       }
     } catch (err) {
       showToast("Gagal memuat batch SK Dirjen: " + err.message, 'error');
@@ -888,10 +924,12 @@ function App() {
   const fetchSkDirjenRecords = async (batchId, filters = {}) => {
     try {
       const params = new URLSearchParams();
+      if (filters.q) params.append('q', filters.q);
       if (filters.kabupaten) params.append('kabupaten', filters.kabupaten);
       if (filters.kecamatan) params.append('kecamatan', filters.kecamatan);
       if (filters.desa) params.append('desa', filters.desa);
       if (filters.tahap) params.append('tahap', filters.tahap);
+      if (filters.asal_batch) params.append('asal_batch', filters.asal_batch);
       if (filters.status) params.append('status', filters.status);
       const qs = params.toString();
       const res = await fetch(`${BACKEND_URL}/api/sk-dirjen/${batchId}/records${qs ? '?' + qs : ''}`);
@@ -899,6 +937,33 @@ function App() {
       setSkDirjenRecords(data.records);
     } catch (err) {
       showToast("Gagal memuat data SK Dirjen: " + err.message, 'error');
+    }
+  };
+
+  const fetchSkDirjenAllRecords = async (filters = {}) => {
+    try {
+      const params = new URLSearchParams();
+      if (filters.q) params.append('q', filters.q);
+      if (filters.kabupaten) params.append('kabupaten', filters.kabupaten);
+      if (filters.kecamatan) params.append('kecamatan', filters.kecamatan);
+      if (filters.desa) params.append('desa', filters.desa);
+      if (filters.tahap) params.append('tahap', filters.tahap);
+      if (filters.asal_batch) params.append('asal_batch', filters.asal_batch);
+      if (filters.status) params.append('status', filters.status);
+      const qs = params.toString();
+      const res = await fetch(`${BACKEND_URL}/api/sk-dirjen/all-records${qs ? '?' + qs : ''}`);
+      const data = await res.json();
+      setSkDirjenRecords(data.records);
+    } catch (err) {
+      showToast("Gagal memuat data SK Dirjen: " + err.message, 'error');
+    }
+  };
+
+  const fetchSkDirjenWithFilters = (filters = {}) => {
+    if (skDirjenSelectedBatch === 'all') {
+      fetchSkDirjenAllRecords({ q: skDirjenDebouncedSearch, ...filters });
+    } else if (skDirjenSelectedBatch) {
+      fetchSkDirjenRecords(skDirjenSelectedBatch, { q: skDirjenDebouncedSearch, ...filters });
     }
   };
 
@@ -937,12 +1002,14 @@ function App() {
       if (!res.ok) throw new Error('Gagal menyetujui');
       showToast("Persetujuan berhasil disimpan", 'success');
       setSkDirjenApprovalRecord(null);
-      if (skDirjenSelectedBatch) fetchSkDirjenRecords(skDirjenSelectedBatch, {
-        kabupaten: skDirjenFilterKab,
-        kecamatan: skDirjenFilterKec,
-        desa: skDirjenFilterDesa,
-        status: skDirjenFilterStatus
-      });
+      if (skDirjenSelectedBatch) {
+        const filters = { kabupaten: skDirjenFilterKab, kecamatan: skDirjenFilterKec, desa: skDirjenFilterDesa, tahap: skDirjenFilterTahap, asal_batch: skDirjenFilterAsalBatch, status: skDirjenFilterStatus };
+        if (skDirjenSelectedBatch === 'all') {
+          fetchSkDirjenAllRecords({ q: skDirjenDebouncedSearch, ...filters });
+        } else {
+          fetchSkDirjenRecords(skDirjenSelectedBatch, { q: skDirjenDebouncedSearch, ...filters });
+        }
+      }
     } catch (err) {
       showToast(err.message, 'error');
     }
@@ -954,7 +1021,14 @@ function App() {
       if (!res.ok) throw new Error('Gagal menolak');
       showToast("Penolakan berhasil disimpan", 'success');
       setSkDirjenApprovalRecord(null);
-      if (skDirjenSelectedBatch) fetchSkDirjenRecords(skDirjenSelectedBatch);
+      if (skDirjenSelectedBatch) {
+        const filters = { kabupaten: skDirjenFilterKab, kecamatan: skDirjenFilterKec, desa: skDirjenFilterDesa, tahap: skDirjenFilterTahap, asal_batch: skDirjenFilterAsalBatch, status: skDirjenFilterStatus };
+        if (skDirjenSelectedBatch === 'all') {
+          fetchSkDirjenAllRecords({ q: skDirjenDebouncedSearch, ...filters });
+        } else {
+          fetchSkDirjenRecords(skDirjenSelectedBatch, { q: skDirjenDebouncedSearch, ...filters });
+        }
+      }
     } catch (err) {
       showToast(err.message, 'error');
     }
@@ -966,7 +1040,7 @@ function App() {
       const res = await fetch(`${BACKEND_URL}/api/sk-dirjen/batch/${batchId}`, { method: 'DELETE' });
       if (!res.ok) throw new Error('Gagal menghapus batch');
       showToast("Batch SK Dirjen berhasil dihapus", 'success');
-      setSkDirjenSelectedBatch(null);
+      setSkDirjenSelectedBatch('all');
       setSkDirjenRecords([]);
       fetchSkDirjenBatches();
     } catch (err) {
@@ -1001,12 +1075,14 @@ function App() {
       setSkDirjenPairingRecord(null);
       setSkDirjenPairSearchTerm('');
       setSkDirjenPairSearchResults([]);
-      if (skDirjenSelectedBatch) fetchSkDirjenRecords(skDirjenSelectedBatch, {
-        kabupaten: skDirjenFilterKab,
-        kecamatan: skDirjenFilterKec,
-        desa: skDirjenFilterDesa,
-        status: skDirjenFilterStatus
-      });
+      if (skDirjenSelectedBatch) {
+        const filters = { kabupaten: skDirjenFilterKab, kecamatan: skDirjenFilterKec, desa: skDirjenFilterDesa, tahap: skDirjenFilterTahap, asal_batch: skDirjenFilterAsalBatch, status: skDirjenFilterStatus };
+        if (skDirjenSelectedBatch === 'all') {
+          fetchSkDirjenAllRecords({ q: skDirjenDebouncedSearch, ...filters });
+        } else {
+          fetchSkDirjenRecords(skDirjenSelectedBatch, { q: skDirjenDebouncedSearch, ...filters });
+        }
+      }
     } catch (err) {
       showToast(err.message, 'error');
     }
@@ -3728,17 +3804,29 @@ function App() {
                     className="sk-dirjen-filter-select"
                     value={skDirjenSelectedBatch || ''}
                     onChange={(e) => {
-                      const val = e.target.value ? parseInt(e.target.value) : null;
+                      const val = e.target.value || 'all';
                       setSkDirjenSelectedBatch(val);
-                      if (val) fetchSkDirjenRecords(val);
+                      setSkDirjenSearchTerm('');
+                      setSkDirjenDebouncedSearch('');
+                      setSkDirjenFilterKab('');
+                      setSkDirjenFilterKec('');
+                      setSkDirjenFilterDesa('');
+                      setSkDirjenFilterTahap('');
+                      setSkDirjenFilterAsalBatch('');
+                      setSkDirjenFilterStatus('');
+                      if (val === 'all') {
+                        fetchSkDirjenAllRecords({});
+                      } else {
+                        fetchSkDirjenRecords(parseInt(val), {});
+                      }
                     }}
                   >
-                    <option value="">Semua Batch SK Dirjen</option>
+                    <option value="all">Semua Batch SK Dirjen</option>
                     {skDirjenBatches.map(b => (
                       <option key={b.id} value={b.id}>{b.stage_name} ({b.total_records} data)</option>
                     ))}
                     </select>
-                    {skDirjenSelectedBatch && (
+                    {skDirjenSelectedBatch && skDirjenSelectedBatch !== 'all' && (
                       <button 
                         className="btn btn-danger" 
                         style={{ marginLeft: 8, padding: '4px 12px', fontSize: '0.75rem' }}
@@ -3758,7 +3846,7 @@ function App() {
                       setSkDirjenFilterKab(e.target.value);
                       setSkDirjenFilterKec('');
                       setSkDirjenFilterDesa('');
-                      fetchSkDirjenRecords(skDirjenSelectedBatch, { kabupaten: e.target.value, kecamatan: '', desa: '', status: skDirjenFilterStatus });
+                      fetchSkDirjenWithFilters({ kabupaten: e.target.value, kecamatan: '', desa: '', tahap: skDirjenFilterTahap, asal_batch: skDirjenFilterAsalBatch, status: skDirjenFilterStatus });
                     }}>
                       <option value="">Semua Kabupaten</option>
                       {[...new Set(skDirjenRecords.map(r => r.kabupaten_kota).filter(Boolean))].sort().map(k => (
@@ -3768,7 +3856,7 @@ function App() {
                     <select className="sk-dirjen-filter-select" value={skDirjenFilterKec} onChange={(e) => {
                       setSkDirjenFilterKec(e.target.value);
                       setSkDirjenFilterDesa('');
-                      fetchSkDirjenRecords(skDirjenSelectedBatch, { kabupaten: skDirjenFilterKab, kecamatan: e.target.value, desa: '', status: skDirjenFilterStatus });
+                      fetchSkDirjenWithFilters({ kabupaten: skDirjenFilterKab, kecamatan: e.target.value, desa: '', tahap: skDirjenFilterTahap, asal_batch: skDirjenFilterAsalBatch, status: skDirjenFilterStatus });
                     }}>
                       <option value="">Semua Kecamatan</option>
                       {[...new Set(skDirjenRecords.filter(r => !skDirjenFilterKab || r.kabupaten_kota === skDirjenFilterKab).map(r => r.kecamatan).filter(Boolean))].sort().map(k => (
@@ -3777,16 +3865,34 @@ function App() {
                     </select>
                     <select className="sk-dirjen-filter-select" value={skDirjenFilterDesa} onChange={(e) => {
                       setSkDirjenFilterDesa(e.target.value);
-                      fetchSkDirjenRecords(skDirjenSelectedBatch, { kabupaten: skDirjenFilterKab, kecamatan: skDirjenFilterKec, desa: e.target.value, status: skDirjenFilterStatus });
+                      fetchSkDirjenWithFilters({ kabupaten: skDirjenFilterKab, kecamatan: skDirjenFilterKec, desa: e.target.value, tahap: skDirjenFilterTahap, asal_batch: skDirjenFilterAsalBatch, status: skDirjenFilterStatus });
                     }}>
                       <option value="">Semua Desa/Kelurahan</option>
                       {[...new Set(skDirjenRecords.filter(r => (!skDirjenFilterKab || r.kabupaten_kota === skDirjenFilterKab) && (!skDirjenFilterKec || r.kecamatan === skDirjenFilterKec)).map(r => r.desa_kelurahan).filter(Boolean))].sort().map(k => (
                         <option key={k} value={k}>{k}</option>
                       ))}
                     </select>
+                    <select className="sk-dirjen-filter-select" value={skDirjenFilterTahap} onChange={(e) => {
+                      setSkDirjenFilterTahap(e.target.value);
+                      fetchSkDirjenWithFilters({ kabupaten: skDirjenFilterKab, kecamatan: skDirjenFilterKec, desa: skDirjenFilterDesa, tahap: e.target.value, asal_batch: skDirjenFilterAsalBatch, status: skDirjenFilterStatus });
+                    }}>
+                      <option value="">Semua Asal Tahap</option>
+                      {[...new Set(skDirjenRecords.map(r => r.verified_stage_name).filter(Boolean))].sort().map(k => (
+                        <option key={k} value={k}>{k}</option>
+                      ))}
+                    </select>
+                    <select className="sk-dirjen-filter-select" value={skDirjenFilterAsalBatch} onChange={(e) => {
+                      setSkDirjenFilterAsalBatch(e.target.value);
+                      fetchSkDirjenWithFilters({ kabupaten: skDirjenFilterKab, kecamatan: skDirjenFilterKec, desa: skDirjenFilterDesa, tahap: skDirjenFilterTahap, asal_batch: e.target.value, status: skDirjenFilterStatus });
+                    }}>
+                      <option value="">Semua Asal Batch</option>
+                      {[...new Set(skDirjenRecords.map(r => r.verified_batch_name).filter(Boolean))].sort().map(k => (
+                        <option key={k} value={k}>{k}</option>
+                      ))}
+                    </select>
                     <select className="sk-dirjen-filter-select" value={skDirjenFilterStatus} onChange={(e) => {
                       setSkDirjenFilterStatus(e.target.value);
-                      fetchSkDirjenRecords(skDirjenSelectedBatch, { kabupaten: skDirjenFilterKab, kecamatan: skDirjenFilterKec, desa: skDirjenFilterDesa, status: e.target.value });
+                      fetchSkDirjenWithFilters({ kabupaten: skDirjenFilterKab, kecamatan: skDirjenFilterKec, desa: skDirjenFilterDesa, tahap: skDirjenFilterTahap, asal_batch: skDirjenFilterAsalBatch, status: e.target.value });
                     }}>
                       <option value="">Semua Status</option>
                       <option value="PERFECT">Cocok</option>
@@ -3796,10 +3902,12 @@ function App() {
                       <option value="MANUAL_PAIR">Dipasangkan</option>
                     </select>
                     <div style={{ marginLeft: 'auto' }}>
-                      <button className="btn btn-secondary btn-sm" onClick={() => window.open(`${BACKEND_URL}/api/sk-dirjen/export/${skDirjenSelectedBatch}`, '_blank')}>
-                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "4px", verticalAlign: "middle" }}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-                        Ekspor Excel
-                      </button>
+                      {skDirjenSelectedBatch !== 'all' && (
+                        <button className="btn btn-secondary btn-sm" onClick={() => window.open(`${BACKEND_URL}/api/sk-dirjen/export/${skDirjenSelectedBatch}`, '_blank')}>
+                          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "4px", verticalAlign: "middle" }}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                          Ekspor Excel
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}
@@ -3825,6 +3933,24 @@ function App() {
                   </div>
                 )}
 
+                {/* Search bar */}
+                {skDirjenSelectedBatch && (
+                  <div style={{ marginBottom: '16px' }}>
+                    <div className="search-wrapper" style={{ maxWidth: '450px' }}>
+                      <span className="search-icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                      </span>
+                      <input 
+                        type="text" 
+                        placeholder="Cari Nama, NIK, KK, Desa, Kecamatan, Kabupaten..."
+                        className="search-input"
+                        value={skDirjenSearchTerm}
+                        onChange={(e) => setSkDirjenSearchTerm(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                )}
+
                 {/* Records table */}
                 {skDirjenSelectedBatch && skDirjenRecords.length > 0 && (
                   <div style={{ overflowX: 'auto' }}>
@@ -3832,6 +3958,7 @@ function App() {
                       <thead>
                         <tr>
                           <th>No</th>
+                          {skDirjenSelectedBatch === 'all' && <th>Tahap</th>}
                           <th>NIK</th>
                           <th>No KK</th>
                           <th>Nama</th>
@@ -3860,6 +3987,7 @@ function App() {
                           return (
                             <tr key={r.id} style={{ background: r.match_type === 'NEEDS_APPROVAL' && r.override_status !== 'APPROVED' ? '#fffbeb' : r.match_type === 'NO_MATCH' ? '#fef2f2' : undefined }}>
                               <td>{r.no_urut}</td>
+                              {skDirjenSelectedBatch === 'all' && <td style={{ fontSize: '0.8rem', color: '#6b7280' }}>{r.batch_stage_name}</td>}
                               <td style={{ fontSize: '0.85rem' }}>{r.no_ktp}</td>
                               <td style={{ fontSize: '0.85rem' }}>{r.no_kk}</td>
                               <td>{r.nama}</td>
@@ -3877,8 +4005,8 @@ function App() {
                                 {r.match_type === 'NO_MATCH' && (
                                   <button className="btn btn-primary btn-sm" onClick={() => {
                                     setSkDirjenPairingRecord(r);
-                                    setSkDirjenPairSearchTerm('');
-                                    setSkDirjenPairSearchResults([]);
+                                    setSkDirjenPairSearchTerm(r.nama);
+                                    handleSkDirjenSearchVerified(r.nama);
                                   }}>
                                     Pasangkan
                                   </button>
@@ -3893,7 +4021,9 @@ function App() {
                 )}
 
                 {skDirjenSelectedBatch && skDirjenRecords.length === 0 && (
-                  <div style={{ textAlign: 'center', color: '#94a3b8', padding: '40px' }}>Tidak ada data ditemukan</div>
+                  <div style={{ textAlign: 'center', color: '#94a3b8', padding: '40px' }}>
+                    {skDirjenDebouncedSearch ? 'Tidak ada data yang cocok dengan pencarian' : 'Tidak ada data ditemukan'}
+                  </div>
                 )}
 
                 {!skDirjenSelectedBatch && (
@@ -4520,7 +4650,7 @@ function App() {
                           <tr>
                             <th className="rekap-corner-cell" rowSpan="2" style={{ width: '45px', minWidth: '45px', maxWidth: '45px', left: 0 }}>No</th>
                             <th className="rekap-corner-cell" rowSpan="2" style={{ width: '220px', minWidth: '220px', maxWidth: '220px', left: '45px', textAlign: 'left', borderRight: '2px solid #bfc6d0', whiteSpace: 'normal', wordBreak: 'break-word' }}>Kabupaten / Kota</th>
-                            <th colSpan="5" className="rekap-corner-cell rekap-total-group-th" style={{ left: '265px', width: '390px', minWidth: '390px', maxWidth: '390px', borderRight: '2px solid #bfc6d0' }}>
+                            <th colSpan="7" className="rekap-corner-cell rekap-total-group-th" style={{ left: '265px', width: '530px', minWidth: '530px', maxWidth: '530px', borderRight: '2px solid #bfc6d0' }}>
                               REKAP TOTAL
                             </th>
                             {groupStages.map(stage => {
@@ -4530,7 +4660,7 @@ function App() {
                               const pctTidakLolos = ((t.tidak_lolos / totalBase) * 100).toFixed(1);
                               const pctBelum = ((t.belum_verifikasi / totalBase) * 100).toFixed(1);
                               return (
-                                <th key={stage.stage_id} colSpan="5" className="rekap-stage-th">
+                                <th key={stage.stage_id} colSpan="7" className="rekap-stage-th">
                                   <div className="rekap-header-progress-container" style={{ marginBottom: '5px' }}>
                                     <div className="rekap-progress-bar-mini" title={`${stage.stage_name} — Lolos: ${pctLolos}%, Tidak Lolos: ${pctTidakLolos}%, Belum: ${pctBelum}%`}>
                                       <div className="rekap-progress-segment rekap-seg-lolos" style={{ width: `${pctLolos}%`, height: '100%' }}></div>
@@ -4547,15 +4677,19 @@ function App() {
                             <th className="rekap-sub-th rekap-sub-total-sticky" style={{ left: '265px', width: '70px', minWidth: '70px', maxWidth: '70px' }}>ALOKASI</th>
                             <th className="rekap-sub-th rekap-sub-total-sticky" style={{ left: '335px', width: '85px', minWidth: '85px', maxWidth: '85px' }}>VERIFIKASI</th>
                             <th className="rekap-sub-th rekap-sub-lolos rekap-sub-total-sticky" style={{ left: '420px', width: '70px', minWidth: '70px', maxWidth: '70px' }}>LOLOS</th>
-                            <th className="rekap-sub-th rekap-sub-tidak rekap-sub-total-sticky" style={{ left: '490px', width: '90px', minWidth: '90px', maxWidth: '90px' }}>TIDAK LOLOS</th>
-                            <th className="rekap-sub-th rekap-sub-belum rekap-sub-total-sticky" style={{ left: '580px', width: '75px', minWidth: '75px', maxWidth: '75px', borderRight: '2px solid #bfc6d0' }}>BELUM</th>
+                            <th className="rekap-sub-th rekap-sub-tidak rekap-sub-total-sticky" style={{ left: '490px', width: '80px', minWidth: '80px', maxWidth: '80px' }}>TIDAK LOLOS</th>
+                            <th className="rekap-sub-th rekap-sub-belum rekap-sub-total-sticky" style={{ left: '570px', width: '65px', minWidth: '65px', maxWidth: '65px' }}>BELUM</th>
+                            <th className="rekap-sub-th rekap-sub-skdirjen-sudah rekap-sub-total-sticky" style={{ left: '635px', width: '65px', minWidth: '65px', maxWidth: '65px' }}>SUDAH</th>
+                            <th className="rekap-sub-th rekap-sub-skdirjen-belum rekap-sub-total-sticky" style={{ left: '700px', width: '65px', minWidth: '65px', maxWidth: '65px', borderRight: '2px solid #bfc6d0' }}>BELUM</th>
                             {groupStages.map(stage => (
                               <React.Fragment key={stage.stage_id}>
                                 <th className="rekap-sub-th">ALOKASI</th>
                                 <th className="rekap-sub-th">VERIFIKASI</th>
                                 <th className="rekap-sub-th rekap-sub-lolos">LOLOS</th>
                                 <th className="rekap-sub-th rekap-sub-tidak">TIDAK LOLOS</th>
-                                <th className="rekap-sub-th rekap-sub-belum" style={{ borderRight: '2px solid #dee2e6' }}>BELUM</th>
+                                <th className="rekap-sub-th rekap-sub-belum">BELUM</th>
+                                <th className="rekap-sub-th rekap-sub-skdirjen-sudah">SUDAH</th>
+                                <th className="rekap-sub-th rekap-sub-skdirjen-belum" style={{ borderRight: '2px solid #dee2e6' }}>BELUM</th>
                               </React.Fragment>
                             ))}
                           </tr>
@@ -4566,7 +4700,7 @@ function App() {
                               const kd = stage.kabupaten_data[kabIdx];
                               return kd && (kd.alokasi > 0 || kd.verifikasi > 0);
                             });
-                            let sumA = 0, sumV = 0, sumL = 0, sumTL = 0, sumB = 0;
+                            let sumA = 0, sumV = 0, sumL = 0, sumTL = 0, sumB = 0, sumSKS = 0, sumSKB = 0;
                             groupStages.forEach(stage => {
                               const kd = stage.kabupaten_data[kabIdx];
                               if (kd) {
@@ -4575,6 +4709,8 @@ function App() {
                                 sumL += kd.lolos || 0;
                                 sumTL += kd.tidak_lolos || 0;
                                 sumB += kd.belum_verifikasi || 0;
+                                sumSKS += kd.sk_dirjen_sudah || 0;
+                                sumSKB += kd.sk_dirjen_belum || 0;
                               }
                             });
                             return (
@@ -4584,8 +4720,10 @@ function App() {
                                 <td className="rekap-frozen-total" style={{ left: '265px', width: '70px', minWidth: '70px', maxWidth: '70px' }}><button className="rekap-link" onClick={() => navigateToData('invers', { kab })}>{sumA || '-'}</button></td>
                                 <td className="rekap-frozen-total" style={{ left: '335px', width: '85px', minWidth: '85px', maxWidth: '85px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab })}>{sumV || '-'}</button></td>
                                 <td className="rekap-frozen-total rekap-cell-lolos" style={{ left: '420px', width: '70px', minWidth: '70px', maxWidth: '70px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab, status: 'LOLOS' })}>{sumL || '-'}</button></td>
-                                <td className="rekap-frozen-total rekap-cell-tidak" style={{ left: '490px', width: '90px', minWidth: '90px', maxWidth: '90px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab, status: 'TIDAK_LOLOS' })}>{sumTL || '-'}</button></td>
-                                <td className="rekap-frozen-total rekap-cell-belum" style={{ left: '580px', width: '75px', minWidth: '75px', maxWidth: '75px', borderRight: '2px solid #bfc6d0' }}><button className="rekap-link" onClick={() => navigateToData('invers', { kab, status: 'BELUM' })}>{sumB || '-'}</button></td>
+                                <td className="rekap-frozen-total rekap-cell-tidak" style={{ left: '490px', width: '80px', minWidth: '80px', maxWidth: '80px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab, status: 'TIDAK_LOLOS' })}>{sumTL || '-'}</button></td>
+                                <td className="rekap-frozen-total rekap-cell-belum" style={{ left: '570px', width: '65px', minWidth: '65px', maxWidth: '65px' }}><button className="rekap-link" onClick={() => navigateToData('invers', { kab, status: 'BELUM' })}>{sumB || '-'}</button></td>
+                                <td className="rekap-frozen-total rekap-cell-skdirjen" style={{ left: '635px', width: '65px', minWidth: '65px', maxWidth: '65px' }}><span className="sk-dirjen-badge sudah">{sumSKS || '-'}</span></td>
+                                <td className="rekap-frozen-total rekap-cell-skdirjen" style={{ left: '700px', width: '65px', minWidth: '65px', maxWidth: '65px', borderRight: '2px solid #bfc6d0' }}><span className="sk-dirjen-badge belum">{sumSKB || '-'}</span></td>
                                 {groupStages.map(stage => {
                                   const kd = stage.kabupaten_data[kabIdx];
                                   const a = kd?.alokasi || 0;
@@ -4593,14 +4731,18 @@ function App() {
                                   const l = kd?.lolos || 0;
                                   const tl = kd?.tidak_lolos || 0;
                                   const b = kd?.belum_verifikasi || 0;
+                                  const sks = kd?.sk_dirjen_sudah || 0;
+                                  const skb = kd?.sk_dirjen_belum || 0;
                                   return (
                                     <React.Fragment key={stage.stage_id}>
                                       <td className="rekap-cell"><button className="rekap-link" onClick={() => navigateToData('invers', { kab, tahap: stage.stage_id })}>{a || '-'}</button></td>
                                       <td className="rekap-cell"><button className="rekap-link" onClick={() => navigateToData('verified', { kab, tahap: stage.stage_id })}>{v || '-'}</button></td>
                                       <td className="rekap-cell rekap-cell-lolos"><button className="rekap-link" onClick={() => navigateToData('verified', { kab, tahap: stage.stage_id, status: 'LOLOS' })}>{l || '-'}</button></td>
                                       <td className="rekap-cell rekap-cell-tidak"><button className="rekap-link" onClick={() => navigateToData('verified', { kab, tahap: stage.stage_id, status: 'TIDAK_LOLOS' })}>{tl || '-'}</button></td>
-                                      <td className="rekap-cell rekap-cell-belum" style={{ borderRight: '2px solid #dee2e6' }}><button className="rekap-link" onClick={() => navigateToData('invers', { kab, tahap: stage.stage_id, status: 'BELUM' })}>{b || '-'}</button></td>
-                                    </React.Fragment>
+                                      <td className="rekap-cell rekap-cell-belum"><button className="rekap-link" onClick={() => navigateToData('invers', { kab, tahap: stage.stage_id, status: 'BELUM' })}>{b || '-'}</button></td>
+                                   <td className="rekap-cell rekap-cell-skdirjen"><span className="sk-dirjen-badge sudah">{sks || '-'}</span></td>
+                                   <td className="rekap-cell rekap-cell-skdirjen" style={{ borderRight: '2px solid #dee2e6' }}><span className="sk-dirjen-badge belum">{skb || '-'}</span></td>
+                                 </React.Fragment>
                                   );
                                 })}
                               </tr>
@@ -4612,7 +4754,7 @@ function App() {
                             <td className="rekap-footer-frozen" style={{ left: 0, width: '45px', minWidth: '45px', maxWidth: '45px' }}></td>
                             <td className="rekap-footer-frozen" style={{ left: '45px', width: '220px', minWidth: '220px', maxWidth: '220px', fontWeight: 700, textAlign: 'left', borderRight: '2px solid #bfc6d0' }}>TOTAL</td>
                             {(() => {
-                              let gA = 0, gV = 0, gL = 0, gTL = 0, gB = 0;
+                              let gA = 0, gV = 0, gL = 0, gTL = 0, gB = 0, gSKS = 0, gSKB = 0;
                               groupStages.forEach(s => {
                                 const t = s.totals;
                                 gA += t.alokasi || 0;
@@ -4620,14 +4762,18 @@ function App() {
                                 gL += t.lolos || 0;
                                 gTL += t.tidak_lolos || 0;
                                 gB += t.belum_verifikasi || 0;
+                                gSKS += t.sk_dirjen_sudah || 0;
+                                gSKB += t.sk_dirjen_belum || 0;
                               });
                                return (
                                 <>
                                   <td className="rekap-footer-frozen rekap-footer-total-sticky" style={{ left: '265px', width: '70px', minWidth: '70px', maxWidth: '70px' }}><button className="rekap-link" onClick={() => navigateToData('invers')}>{gA}</button></td>
                                   <td className="rekap-footer-frozen rekap-footer-total-sticky" style={{ left: '335px', width: '85px', minWidth: '85px', maxWidth: '85px' }}><button className="rekap-link" onClick={() => navigateToData('verified')}>{gV}</button></td>
                                   <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-lolos" style={{ left: '420px', width: '70px', minWidth: '70px', maxWidth: '70px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { status: 'LOLOS' })}>{gL}</button></td>
-                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-tidak" style={{ left: '490px', width: '90px', minWidth: '90px', maxWidth: '90px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { status: 'TIDAK_LOLOS' })}>{gTL}</button></td>
-                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-belum" style={{ left: '580px', width: '75px', minWidth: '75px', maxWidth: '75px', borderRight: '2px solid #bfc6d0' }}><button className="rekap-link" onClick={() => navigateToData('invers', { status: 'BELUM' })}>{gB}</button></td>
+                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-tidak" style={{ left: '490px', width: '80px', minWidth: '80px', maxWidth: '80px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { status: 'TIDAK_LOLOS' })}>{gTL}</button></td>
+                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-belum" style={{ left: '570px', width: '65px', minWidth: '65px', maxWidth: '65px' }}><button className="rekap-link" onClick={() => navigateToData('invers', { status: 'BELUM' })}>{gB}</button></td>
+                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-skdirjen" style={{ left: '635px', width: '65px', minWidth: '65px', maxWidth: '65px' }}><span className="sk-dirjen-badge sudah">{gSKS}</span></td>
+                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-skdirjen" style={{ left: '700px', width: '65px', minWidth: '65px', maxWidth: '65px', borderRight: '2px solid #bfc6d0' }}><span className="sk-dirjen-badge belum">{gSKB}</span></td>
                                 </>
                                );
                              })()}
@@ -4639,7 +4785,9 @@ function App() {
                                    <td className="rekap-footer-cell"><button className="rekap-link" onClick={() => navigateToData('verified', { tahap: stage.stage_id })}>{t.verifikasi}</button></td>
                                    <td className="rekap-footer-cell rekap-cell-lolos"><button className="rekap-link" onClick={() => navigateToData('verified', { tahap: stage.stage_id, status: 'LOLOS' })}>{t.lolos}</button></td>
                                    <td className="rekap-footer-cell rekap-cell-tidak"><button className="rekap-link" onClick={() => navigateToData('verified', { tahap: stage.stage_id, status: 'TIDAK_LOLOS' })}>{t.tidak_lolos}</button></td>
-                                   <td className="rekap-footer-cell rekap-cell-belum" style={{ borderRight: '2px solid #dee2e6' }}><button className="rekap-link" onClick={() => navigateToData('invers', { tahap: stage.stage_id, status: 'BELUM' })}>{t.belum_verifikasi}</button></td>
+                                   <td className="rekap-footer-cell rekap-cell-belum"><button className="rekap-link" onClick={() => navigateToData('invers', { tahap: stage.stage_id, status: 'BELUM' })}>{t.belum_verifikasi}</button></td>
+                                   <td className="rekap-footer-cell rekap-cell-skdirjen"><span className="sk-dirjen-badge sudah">{t.sk_dirjen_sudah || '-'}</span></td>
+                                   <td className="rekap-footer-cell rekap-cell-skdirjen" style={{ borderRight: '2px solid #dee2e6' }}><span className="sk-dirjen-badge belum">{t.sk_dirjen_belum || '-'}</span></td>
                                  </React.Fragment>
                                );
                              })}
@@ -5066,11 +5214,15 @@ function App() {
               <div style={{ flex: 1, border: '2px solid #16a34a', borderRadius: '12px', padding: '16px' }}>
                 <h4 style={{ color: '#16a34a', marginBottom: '12px', fontSize: '0.95rem' }}>Data Terverifikasi</h4>
                 <div style={{ display: 'grid', gap: '8px', fontSize: '0.85rem' }}>
-                  <div><strong>Nama:</strong> {skDirjenApprovalRecord.verified_batch_name ? '—' : 'Tidak ditemukan'}</div>
+                  <div><strong>Nama:</strong> {skDirjenApprovalRecord.verified_nama || '—'}</div>
+                  <div><strong>NIK:</strong> {skDirjenApprovalRecord.verified_no_ktp || '—'}</div>
+                  <div><strong>KK:</strong> {skDirjenApprovalRecord.verified_no_kk || '—'}</div>
+                  <div><strong>Alamat:</strong> {skDirjenApprovalRecord.verified_alamat || '—'}</div>
+                  <div><strong>Desa:</strong> {skDirjenApprovalRecord.verified_desa_kelurahan || '—'}</div>
+                  <div><strong>Kecamatan:</strong> {skDirjenApprovalRecord.verified_kecamatan || '—'}</div>
+                  <div><strong>Kabupaten:</strong> {skDirjenApprovalRecord.verified_kabupaten_kota || '—'}</div>
                   {skDirjenApprovalRecord.verified_batch_name && (
-                    <>
-                      <div><strong>Asal:</strong> BA {skDirjenApprovalRecord.verified_batch_name} Tahap {skDirjenApprovalRecord.verified_stage_name}</div>
-                    </>
+                    <div><strong>Asal:</strong> BA {skDirjenApprovalRecord.verified_batch_name} Tahap {skDirjenApprovalRecord.verified_stage_name}</div>
                   )}
                 </div>
               </div>
@@ -5089,7 +5241,7 @@ function App() {
       {/* Invers Manual Pairing Modal — Pasangkan data INVERS "Belum" dengan data Terverifikasi */}
       {showPairModal && pairingInvers && (
         <div className="modal-overlay" onClick={() => setShowPairModal(false)}>
-          <div className="modal-content" style={{ width: '100%', maxWidth: '1300px', maxHeight: '85vh' }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content" style={{ width: '98vw', maxHeight: '85vh' }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3 style={{ margin: 0, fontSize: '1rem' }}>
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px', verticalAlign: 'middle' }}><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
@@ -5165,7 +5317,7 @@ function App() {
       {/* SK Dirjen Pairing Modal — Pasangkan NO_MATCH dengan data Terverifikasi global */}
       {skDirjenPairingRecord && (
         <div className="modal-overlay" onClick={() => setSkDirjenPairingRecord(null)}>
-          <div className="modal-content" style={{ maxWidth: '750px', maxHeight: '85vh' }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content" style={{ width: '98vw', maxHeight: '85vh' }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3 style={{ margin: 0, fontSize: '1rem' }}>
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '8px', verticalAlign: 'middle' }}><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
