@@ -2633,6 +2633,7 @@ def export_rekap_keseluruhan():
                     max_len = len(val)
             ws.column_dimensions[col_letter].width = max(max_len + 4, 10)
         ws.column_dimensions['B'].width = 28
+        ws.freeze_panes = 'C6'
 
     ws_murni = wb.active
     ws_murni.title = "Rekap Invers Murni"
@@ -3230,16 +3231,15 @@ def export_rekap_batch_ba(published_only: int = 1):
                 c_idx += 3
                 
         for col in ws.columns:
-            max_len = 0
-            col_letter = get_column_letter(col[0].column)
-            for cell in col:
-                val = str(cell.value or '')
-                if cell.row in [1, 2]:
-                    continue
-                if len(val) > max_len:
-                    max_len = len(val)
-            ws.column_dimensions[col_letter].width = max(max_len + 4, 10)
-        ws.column_dimensions['B'].width = 28
+            col_idx = col[0].column
+            col_letter = get_column_letter(col_idx)
+            if col_idx == 1:
+                ws.column_dimensions[col_letter].width = 6
+            elif col_idx == 2:
+                ws.column_dimensions[col_letter].width = 28
+            else:
+                ws.column_dimensions[col_letter].width = 14
+        ws.freeze_panes = 'C7'
         
     ws_murni = wb.active
     ws_murni.title = "Rekap Batch Murni"
