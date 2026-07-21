@@ -16,7 +16,8 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
-from database import get_db_connection, DB_PATH
+from database import get_db_connection, DB_PATH, init_db
+init_db()
 
 BASE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
 
@@ -455,7 +456,7 @@ def get_stage_summary(stage_id: int):
     cursor.execute("SELECT id, revision_num, filename FROM invers_revisions WHERE stage_id = ? AND is_active = 1", (stage_id,))
     active_rev = cursor.fetchone()
     
-    cursor.execute("SELECT id, name, uploaded_at, is_published FROM verified_batches WHERE stage_id = ? ORDER BY uploaded_at ASC", (stage_id,))
+    cursor.execute("SELECT id, name, uploaded_at, is_published, nomor_ba, tanggal_ba FROM verified_batches WHERE stage_id = ? ORDER BY uploaded_at ASC", (stage_id,))
     batches = [dict(row) for row in cursor.fetchall()]
     
     lolos_total = 0
@@ -645,6 +646,33 @@ def toggle_batch_published(batch_id: int):
         raise HTTPException(status_code=500, detail=f"Gagal mengubah status: {str(e)}")
     conn.close()
     return {"batch_id": batch_id, "is_published": new_status}
+
+@app.post("/api/verified/batch/{batch_id}/save-metadata")
+def save_batch_metadata(batch_id: int, body: dict = Body(...)):
+    nomor_ba = body.get("nomor_ba", "")
+    tanggal_ba = body.get("tanggal_ba", "")
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT id FROM verified_batches WHERE id = ?", (batch_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Batch tidak ditemukan")
+            
+        cursor.execute("""
+            UPDATE verified_batches 
+            SET nomor_ba = ?, tanggal_ba = ? 
+            WHERE id = ?
+        """, (nomor_ba, tanggal_ba, batch_id))
+        conn.commit()
+    except HTTPException:
+        conn.close()
+        raise
+    except Exception as e:
+        conn.close()
+        raise HTTPException(status_code=500, detail=f"Gagal menyimpan metadata: {str(e)}")
+    conn.close()
+    return {"status": "success", "message": "Metadata batch berhasil disimpan"}
 
 @app.get("/api/stage/{stage_id}/records")
 def get_stage_records(stage_id: int):
@@ -1184,6 +1212,12 @@ async def export_docx_files(
         batch_row = cursor.fetchone()
         if batch_row:
             batch_name = batch_row['name']
+        cursor.execute("""
+            UPDATE verified_batches 
+            SET nomor_ba = ?, tanggal_ba = ? 
+            WHERE id = ?
+        """, (nomor_ba, tanggal_ba, batch_id))
+        conn.commit()
             
     # Total data INVERS di tahap aktif
     cursor.execute("""
@@ -1427,6 +1461,12 @@ async def export_pdf_files(
         batch_row = cursor.fetchone()
         if batch_row:
             batch_name = batch_row['name']
+        cursor.execute("""
+            UPDATE verified_batches 
+            SET nomor_ba = ?, tanggal_ba = ? 
+            WHERE id = ?
+        """, (nomor_ba, tanggal_ba, batch_id))
+        conn.commit()
     
     cursor.execute("""
         SELECT COUNT(*) as cnt FROM invers_records ir
@@ -2779,11 +2819,446 @@ def get_rekap_keseluruhan(published_only: int = 0):
             }
         })
     
+    return {
+        "all_kabupaten": all_kabupaten,
+        "stages": stages_data
+    }
+
+# --- REKAP BATCH BERITA ACARA ---
+@app.get("/api/rekap-batch-ba")
+def get_rekap_batch_ba(published_only: int = 1):
+    import re
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # 1. Get all stages
+    cursor.execute("SELECT id, name FROM invers_stages ORDER BY id ASC")
+    all_stages = [dict(r) for r in cursor.fetchall()]
+    def get_stage_num(s):
+        match = re.search(r'\d+', s['name'])
+        return int(match.group()) if match else 999
+    all_stages = sorted(all_stages, key=get_stage_num)
+    
+    # 2. Get list of kabupaten/kota
+    published_filter = "AND vb.is_published = 1" if published_only else ""
+    cursor.execute(f"""
+        SELECT DISTINCT UPPER(TRIM(COALESCE(kabupaten_kota, ''))) as kab 
+        FROM invers_records ir
+        JOIN invers_revisions irv ON ir.revision_id = irv.id
+        WHERE irv.is_active = 1 AND TRIM(COALESCE(kabupaten_kota, '')) != ''
+        UNION
+        SELECT DISTINCT UPPER(TRIM(COALESCE(vr.kabupaten_kota, ''))) as kab
+        FROM verified_records vr
+        JOIN verified_batches vb ON vr.batch_id = vb.id
+        LEFT JOIN reconciliation_overrides ro ON ro.original_no_ktp = vr.no_ktp AND ro.stage_id = vb.stage_id
+        WHERE (vr.is_duplicate_in_previous = 0 OR ro.id IS NOT NULL) AND TRIM(COALESCE(vr.kabupaten_kota, '')) != ''
+        {published_filter}
+        ORDER BY kab ASC
+    """)
+    all_kabupaten = [r['kab'] for r in cursor.fetchall()]
+    
+    # 3. For each stage, get its batches
+    stage_batch_filter = "AND is_published = 1" if published_only else ""
+    stages_data = []
+    
+    for stage in all_stages:
+        stage_id = stage['id']
+        stage_name = stage['name']
+        
+        cursor.execute(f"""
+            SELECT id, name, is_published, nomor_ba, tanggal_ba 
+            FROM verified_batches 
+            WHERE stage_id = ? {stage_batch_filter}
+            ORDER BY uploaded_at ASC, id ASC
+        """, (stage_id,))
+        batches = [dict(r) for r in cursor.fetchall()]
+        
+        if not batches:
+            continue
+            
+        batches_data = []
+        for batch in batches:
+            batch_id = batch['id']
+            batch_name = batch['name']
+            
+            cursor.execute("""
+                SELECT UPPER(TRIM(COALESCE(kabupaten_kota, ''))) as kab,
+                       SUM(CASE WHEN status = 'LOLOS' THEN 1 ELSE 0 END) as lolos,
+                       SUM(CASE WHEN status = 'TIDAK LOLOS' THEN 1 ELSE 0 END) as tidak_lolos
+                FROM verified_records
+                WHERE batch_id = ? AND TRIM(COALESCE(kabupaten_kota, '')) != ''
+                GROUP BY kab
+            """, (batch_id,))
+            
+            stats_by_kab = {}
+            for row in cursor.fetchall():
+                stats_by_kab[row['kab']] = {
+                    "lolos": row['lolos'],
+                    "tidak_lolos": row['tidak_lolos'],
+                    "verifikasi": row['lolos'] + row['tidak_lolos']
+                }
+            
+            kab_data = []
+            total_verifikasi = 0
+            total_lolos = 0
+            total_tidak_lolos = 0
+            
+            for kab in all_kabupaten:
+                stats = stats_by_kab.get(kab, {"lolos": 0, "tidak_lolos": 0, "verifikasi": 0})
+                kab_data.append({
+                    "kabupaten": kab,
+                    "verifikasi": stats["verifikasi"],
+                    "lolos": stats["lolos"],
+                    "tidak_lolos": stats["tidak_lolos"]
+                })
+                total_verifikasi += stats["verifikasi"]
+                total_lolos += stats["lolos"]
+                total_tidak_lolos += stats["tidak_lolos"]
+                
+            batches_data.append({
+                "batch_id": batch_id,
+                "batch_name": batch_name,
+                "is_published": batch["is_published"],
+                "nomor_ba": batch.get("nomor_ba"),
+                "tanggal_ba": batch.get("tanggal_ba"),
+                "kabupaten_data": kab_data,
+                "totals": {
+                    "verifikasi": total_verifikasi,
+                    "lolos": total_lolos,
+                    "tidak_lolos": total_tidak_lolos
+                }
+            })
+            
+        stage_type = "pengganti" if "pengganti" in stage_name.lower() else "murni"
+        stages_data.append({
+            "stage_id": stage_id,
+            "stage_name": stage_name,
+            "stage_type": stage_type,
+            "batches": batches_data
+        })
+        
     conn.close()
     return {
         "all_kabupaten": all_kabupaten,
         "stages": stages_data
     }
+
+@app.get("/api/rekap-batch-ba/export")
+def export_rekap_batch_ba(published_only: int = 1):
+    import re
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # 1. Get all stages
+    cursor.execute("SELECT id, name FROM invers_stages ORDER BY id ASC")
+    all_stages = [dict(r) for r in cursor.fetchall()]
+    def get_stage_num(s):
+        match = re.search(r'\d+', s['name'])
+        return int(match.group()) if match else 999
+    all_stages = sorted(all_stages, key=get_stage_num)
+    
+    # 2. Get list of kabupaten/kota
+    published_filter = "AND vb.is_published = 1" if published_only else ""
+    cursor.execute(f"""
+        SELECT DISTINCT UPPER(TRIM(COALESCE(kabupaten_kota, ''))) as kab 
+        FROM invers_records ir
+        JOIN invers_revisions irv ON ir.revision_id = irv.id
+        WHERE irv.is_active = 1 AND TRIM(COALESCE(kabupaten_kota, '')) != ''
+        UNION
+        SELECT DISTINCT UPPER(TRIM(COALESCE(vr.kabupaten_kota, ''))) as kab
+        FROM verified_records vr
+        JOIN verified_batches vb ON vr.batch_id = vb.id
+        LEFT JOIN reconciliation_overrides ro ON ro.original_no_ktp = vr.no_ktp AND ro.stage_id = vb.stage_id
+        WHERE (vr.is_duplicate_in_previous = 0 OR ro.id IS NOT NULL) AND TRIM(COALESCE(vr.kabupaten_kota, '')) != ''
+        {published_filter}
+        ORDER BY kab ASC
+    """)
+    all_kabupaten = [r['kab'] for r in cursor.fetchall()]
+    
+    stage_batch_filter = "AND is_published = 1" if published_only else ""
+    stages_data = []
+    
+    for stage in all_stages:
+        stage_id = stage['id']
+        stage_name = stage['name']
+        
+        cursor.execute(f"""
+            SELECT id, name, nomor_ba, tanggal_ba 
+            FROM verified_batches 
+            WHERE stage_id = ? {stage_batch_filter}
+            ORDER BY uploaded_at ASC, id ASC
+        """, (stage_id,))
+        batches = [dict(r) for r in cursor.fetchall()]
+        
+        if not batches:
+            continue
+            
+        batches_data = []
+        for batch in batches:
+            batch_id = batch['id']
+            batch_name = batch['name']
+            
+            cursor.execute("""
+                SELECT UPPER(TRIM(COALESCE(kabupaten_kota, ''))) as kab,
+                       SUM(CASE WHEN status = 'LOLOS' THEN 1 ELSE 0 END) as lolos,
+                       SUM(CASE WHEN status = 'TIDAK LOLOS' THEN 1 ELSE 0 END) as tidak_lolos
+                FROM verified_records
+                WHERE batch_id = ? AND TRIM(COALESCE(kabupaten_kota, '')) != ''
+                GROUP BY kab
+            """, (batch_id,))
+            
+            stats_by_kab = {}
+            for row in cursor.fetchall():
+                stats_by_kab[row['kab']] = {
+                    "lolos": row['lolos'],
+                    "tidak_lolos": row['tidak_lolos'],
+                    "verifikasi": row['lolos'] + row['tidak_lolos']
+                }
+            
+            kab_data = {}
+            total_verifikasi = 0
+            total_lolos = 0
+            total_tidak_lolos = 0
+            for kab in all_kabupaten:
+                stats = stats_by_kab.get(kab, {"lolos": 0, "tidak_lolos": 0, "verifikasi": 0})
+                kab_data[kab] = {
+                    "verifikasi": stats["verifikasi"],
+                    "lolos": stats["lolos"],
+                    "tidak_lolos": stats["tidak_lolos"]
+                }
+                total_verifikasi += stats["verifikasi"]
+                total_lolos += stats["lolos"]
+                total_tidak_lolos += stats["tidak_lolos"]
+                
+            batches_data.append({
+                "batch_id": batch_id,
+                "batch_name": batch_name,
+                "nomor_ba": batch.get("nomor_ba"),
+                "tanggal_ba": batch.get("tanggal_ba"),
+                "data": kab_data,
+                "totals": {
+                    "verifikasi": total_verifikasi,
+                    "lolos": total_lolos,
+                    "tidak_lolos": total_tidak_lolos
+                }
+            })
+            
+        stage_type = "pengganti" if "pengganti" in stage_name.lower() else "murni"
+        stages_data.append({
+            "stage_name": stage_name,
+            "stage_type": stage_type,
+            "batches": batches_data
+        })
+        
+    conn.close()
+    
+    murni_stages = [s for s in stages_data if s['stage_type'] == 'murni']
+    pengganti_stages = [s for s in stages_data if s['stage_type'] == 'pengganti']
+    
+    wb = openpyxl.Workbook()
+    
+    font_title = Font(name='Segoe UI', size=15, bold=True, color='1F4E78')
+    font_subtitle = Font(name='Segoe UI', size=10, italic=True, color='595959')
+    font_header_corner = Font(name='Segoe UI', size=9, bold=True, color='2C3E50')
+    font_header_l1 = Font(name='Segoe UI', size=9, bold=True, color='FFFFFF')
+    font_header_l2 = Font(name='Segoe UI', size=8, bold=True, color='2C3E50')
+    font_header_l3 = Font(name='Segoe UI', size=8, bold=True, color='595959')
+    
+    font_data = Font(name='Segoe UI', size=9)
+    font_total = Font(name='Segoe UI', size=9, bold=True)
+    
+    fill_corner = PatternFill(start_color='EAF0F6', end_color='EAF0F6', fill_type='solid')
+    fill_l1 = PatternFill(start_color='1F4E78', end_color='1F4E78', fill_type='solid')
+    fill_l2 = PatternFill(start_color='FCE4D6', end_color='FCE4D6', fill_type='solid')
+    fill_l3 = PatternFill(start_color='F2F4F4', end_color='F2F4F4', fill_type='solid')
+    fill_total_row = PatternFill(start_color='EAF0F6', end_color='EAF0F6', fill_type='solid')
+    
+    fill_lolos_cell = PatternFill(start_color='E8F5E9', end_color='E8F5E9', fill_type='solid')
+    fill_tidak_lolos_cell = PatternFill(start_color='FDEDEC', end_color='FDEDEC', fill_type='solid')
+    font_lolos_cell = Font(name='Segoe UI', size=9, color='2E7D32')
+    font_tidak_lolos_cell = Font(name='Segoe UI', size=9, color='C0392B')
+    
+    border_thin = Border(
+        left=Side(style='thin', color='D3D3D3'),
+        right=Side(style='thin', color='D3D3D3'),
+        top=Side(style='thin', color='D3D3D3'),
+        bottom=Side(style='thin', color='D3D3D3')
+    )
+    border_double_top = Border(
+        top=Side(style='double', color='2C3E50'),
+        bottom=Side(style='thin', color='D3D3D3'),
+        left=Side(style='thin', color='D3D3D3'),
+        right=Side(style='thin', color='D3D3D3')
+    )
+    
+    align_center = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    align_left = Alignment(horizontal='left', vertical='center')
+    
+    def build_worksheet(ws, title, subtitle, group_stages):
+        ws['A1'] = title
+        ws['A1'].font = font_title
+        ws['A2'] = subtitle
+        ws['A2'].font = font_subtitle
+        
+        cell_no = ws.cell(row=4, column=1, value="No")
+        cell_no.font = font_header_corner
+        cell_no.fill = fill_corner
+        cell_no.alignment = align_center
+        ws.merge_cells(start_row=4, start_column=1, end_row=6, end_column=1)
+        
+        cell_kab = ws.cell(row=4, column=2, value="Kabupaten / Kota")
+        cell_kab.font = font_header_corner
+        cell_kab.fill = fill_corner
+        cell_kab.alignment = align_center
+        ws.merge_cells(start_row=4, start_column=2, end_row=6, end_column=2)
+        
+        col_idx = 3
+        for stage in group_stages:
+            num_batches = len(stage['batches'])
+            if num_batches == 0:
+                continue
+                
+            stage_width = num_batches * 3
+            cell_stage = ws.cell(row=4, column=col_idx, value=stage['stage_name'].upper())
+            cell_stage.font = font_header_l1
+            cell_stage.fill = fill_l1
+            cell_stage.alignment = align_center
+            ws.merge_cells(start_row=4, start_column=col_idx, end_row=4, end_column=col_idx + stage_width - 1)
+            
+            b_col_idx = col_idx
+            for batch in stage['batches']:
+                val_str = f"{batch['batch_name'].upper()}\nNo: {batch.get('nomor_ba') or '—'}\nTgl: {batch.get('tanggal_ba') or '—'}"
+                cell_batch = ws.cell(row=5, column=b_col_idx, value=val_str)
+                cell_batch.font = font_header_l2
+                cell_batch.fill = fill_l2
+                cell_batch.alignment = align_center
+                ws.merge_cells(start_row=5, start_column=b_col_idx, end_row=5, end_column=b_col_idx + 2)
+                ws.row_dimensions[5].height = 42
+                
+                metrics = ["VERIFIKASI", "LOLOS", "TIDAK LOLOS"]
+                for i, m in enumerate(metrics):
+                    cell_m = ws.cell(row=6, column=b_col_idx + i, value=m)
+                    cell_m.font = font_header_l3
+                    cell_m.fill = fill_l3
+                    cell_m.alignment = align_center
+                    
+                b_col_idx += 3
+            col_idx += stage_width
+            
+        max_col = 2
+        for stage in group_stages:
+            max_col += len(stage['batches']) * 3
+            
+        for r in range(4, 7):
+            for c in range(1, max_col + 1):
+                cell = ws.cell(row=r, column=c)
+                cell.border = border_thin
+                
+        row_idx = 7
+        for idx, kab in enumerate(all_kabupaten):
+            ws.cell(row=row_idx, column=1, value=idx + 1).alignment = align_center
+            ws.cell(row=row_idx, column=1).font = font_data
+            ws.cell(row=row_idx, column=1).border = border_thin
+            
+            ws.cell(row=row_idx, column=2, value=kab).font = font_total
+            ws.cell(row=row_idx, column=2).border = border_thin
+            
+            c_idx = 3
+            for stage in group_stages:
+                for batch in stage['batches']:
+                    kd = batch['data'].get(kab, {"verifikasi": 0, "lolos": 0, "tidak_lolos": 0})
+                    val_v = kd['verifikasi']
+                    val_l = kd['lolos']
+                    val_tl = kd['tidak_lolos']
+                    
+                    cell_v = ws.cell(row=row_idx, column=c_idx, value=val_v or "-")
+                    cell_l = ws.cell(row=row_idx, column=c_idx + 1, value=val_l or "-")
+                    cell_tl = ws.cell(row=row_idx, column=c_idx + 2, value=val_tl or "-")
+                    
+                    cell_v.alignment = align_center
+                    cell_l.alignment = align_center
+                    cell_tl.alignment = align_center
+                    
+                    cell_v.font = font_data
+                    cell_l.font = font_lolos_cell if val_l > 0 else font_data
+                    cell_tl.font = font_tidak_lolos_cell if val_tl > 0 else font_data
+                    
+                    if val_l > 0:
+                        cell_l.fill = fill_lolos_cell
+                    if val_tl > 0:
+                        cell_tl.fill = fill_tidak_lolos_cell
+                        
+                    cell_v.border = border_thin
+                    cell_l.border = border_thin
+                    cell_tl.border = border_thin
+                    c_idx += 3
+            row_idx += 1
+            
+        cell_tot_label = ws.cell(row=row_idx, column=2, value="TOTAL")
+        cell_tot_label.font = font_total
+        cell_tot_label.alignment = align_left
+        cell_tot_label.fill = fill_total_row
+        cell_tot_label.border = border_double_top
+        
+        cell_tot_no = ws.cell(row=row_idx, column=1)
+        cell_tot_no.fill = fill_total_row
+        cell_tot_no.border = border_double_top
+        
+        c_idx = 3
+        for stage in group_stages:
+            for batch in stage['batches']:
+                t = batch['totals']
+                cell_tot_v = ws.cell(row=row_idx, column=c_idx, value=t['verifikasi'])
+                cell_tot_l = ws.cell(row=row_idx, column=c_idx + 1, value=t['lolos'])
+                cell_tot_tl = ws.cell(row=row_idx, column=c_idx + 2, value=t['tidak_lolos'])
+                
+                cell_tot_v.font = font_total
+                cell_tot_l.font = font_total
+                cell_tot_tl.font = font_total
+                
+                cell_tot_v.alignment = align_center
+                cell_tot_l.alignment = align_center
+                cell_tot_tl.alignment = align_center
+                
+                cell_tot_v.fill = fill_total_row
+                cell_tot_l.fill = fill_total_row
+                cell_tot_tl.fill = fill_total_row
+                
+                cell_tot_v.border = border_double_top
+                cell_tot_l.border = border_double_top
+                cell_tot_tl.border = border_double_top
+                c_idx += 3
+                
+        for col in ws.columns:
+            max_len = 0
+            col_letter = get_column_letter(col[0].column)
+            for cell in col:
+                val = str(cell.value or '')
+                if cell.row in [1, 2]:
+                    continue
+                if len(val) > max_len:
+                    max_len = len(val)
+            ws.column_dimensions[col_letter].width = max(max_len + 4, 10)
+        ws.column_dimensions['B'].width = 28
+        
+    ws_murni = wb.active
+    ws_murni.title = "Rekap Batch Murni"
+    build_worksheet(ws_murni, "REKAPITULASI BATCH INVERS MURNI", "Sistem Verifikasi Perumahan Swadaya — Laporan per Batch Murni", murni_stages)
+    
+    if pengganti_stages:
+        ws_pengganti = wb.create_sheet("Rekap Batch Pengganti")
+        build_worksheet(ws_pengganti, "REKAPITULASI BATCH INVERS PENGGANTI", "Sistem Verifikasi Perumahan Swadaya — Laporan per Batch Pengganti", pengganti_stages)
+        
+    file_stream = io.BytesIO()
+    wb.save(file_stream)
+    file_stream.seek(0)
+    
+    filename = "REKAP_BATCH_BERITA_ACARA.xlsx"
+    return StreamingResponse(
+        file_stream,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
 
 # --- GLOBAL SEARCH (Cross-stage search for invers + verified records) ---
 @app.get("/api/global-search")

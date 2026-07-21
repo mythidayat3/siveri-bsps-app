@@ -75,6 +75,16 @@ def init_db():
         cursor.execute("SELECT is_published FROM verified_batches LIMIT 1")
     except Exception:
         cursor.execute("ALTER TABLE verified_batches ADD COLUMN is_published INTEGER DEFAULT 0")
+        
+    # Migration: add nomor_ba and tanggal_ba to verified_batches if missing
+    try:
+        cursor.execute("SELECT nomor_ba FROM verified_batches LIMIT 1")
+    except Exception:
+        cursor.execute("ALTER TABLE verified_batches ADD COLUMN nomor_ba TEXT")
+    try:
+        cursor.execute("SELECT tanggal_ba FROM verified_batches LIMIT 1")
+    except Exception:
+        cursor.execute("ALTER TABLE verified_batches ADD COLUMN tanggal_ba TEXT")
     
     # 5. Verified Records
     cursor.execute("""

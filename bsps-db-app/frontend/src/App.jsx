@@ -301,11 +301,26 @@ function App() {
     } catch { return null; }
   };
 
-  const handleSaveTemplate = () => {
+  const handleSaveTemplate = async () => {
     if (!selectedStageId || !selectedBatchIdForWord) return;
     try {
       localStorage.setItem(getTemplateKey(selectedStageId, selectedBatchIdForWord), JSON.stringify(wordFormData));
-      showToast("Template form berhasil disimpan!");
+      
+      const res = await fetch(`${BACKEND_URL}/api/verified/batch/${selectedBatchIdForWord}/save-metadata`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nomor_ba: wordFormData.nomor_ba,
+          tanggal_ba: wordFormData.tanggal_ba
+        })
+      });
+      
+      if (!res.ok) {
+        throw new Error("Gagal mengirim metadata ke server");
+      }
+      
+      showToast("Template form dan metadata Berita Acara berhasil disimpan!");
+      fetchRekapBatchBA();
     } catch (err) {
       showToast("Gagal menyimpan template: " + err.message, "error");
     }
@@ -341,6 +356,10 @@ function App() {
   const [rekapData, setRekapData] = useState(null);
   const [rekapUnggahanData, setRekapUnggahanData] = useState(null);
   const [rekapLoading, setRekapLoading] = useState(false);
+
+  // State Rekap Batch Berita Acara
+  const [rekapBatchData, setRekapBatchData] = useState(null);
+  const [rekapBatchLoading, setRekapBatchLoading] = useState(false);
 
   // State Pencarian Global
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
@@ -462,12 +481,31 @@ function App() {
   useEffect(() => {
     if (showWordModal && selectedBatchIdForWord && selectedStageId) {
       const saved = getSavedTemplate();
+      const currentBatch = stageSummary?.batches?.find(b => b.id === selectedBatchIdForWord);
+      
+      const defaultData = {
+        nomor_ba: currentBatch?.nomor_ba || '',
+        nomor_surat: '',
+        tanggal_ba: currentBatch?.tanggal_ba || '',
+        lokasi_ba: '',
+        no_surat_dirjen: '',
+        tgl_surat_dirjen: '',
+        hal_surat_dirjen: ''
+      };
+      
       if (saved) {
-        setWordFormData(saved);
+        setWordFormData({
+          ...defaultData,
+          ...saved,
+          nomor_ba: currentBatch?.nomor_ba || saved.nomor_ba || '',
+          tanggal_ba: currentBatch?.tanggal_ba || saved.tanggal_ba || ''
+        });
+      } else {
+        setWordFormData(defaultData);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showWordModal, selectedBatchIdForWord, selectedStageId]);
+  }, [showWordModal, selectedBatchIdForWord, selectedStageId, stageSummary]);
 
   const fetchStageData = async (stageId) => {
     setBatchBreakdownCache({});
@@ -542,6 +580,20 @@ function App() {
       showToast(err.message, 'error');
     } finally {
       setRekapLoading(false);
+    }
+  };
+
+  const fetchRekapBatchBA = async () => {
+    setRekapBatchLoading(true);
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/rekap-batch-ba?published_only=1`);
+      if (!res.ok) throw new Error("Gagal mengambil data rekap batch berita acara");
+      const data = await res.json();
+      setRekapBatchData(data);
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setRekapBatchLoading(false);
     }
   };
 
@@ -1140,6 +1192,10 @@ function App() {
 
   const handleExportRekapKeseluruhan = () => {
     window.open(`${BACKEND_URL}/api/rekap-keseluruhan/export`, '_blank');
+  };
+
+  const handleExportRekapBatchBA = () => {
+    window.open(`${BACKEND_URL}/api/rekap-batch-ba/export`, '_blank');
   };
 
   const handleExportFilteredInvers = () => {
@@ -2215,6 +2271,13 @@ function App() {
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M16 6l2.29 2.29-4.88 4.88-4-4L2 16.59 3.41 18l6-6 4 4 6.3-6.29L22 12V6h-6z"/></svg>
               Rekap Keseluruhan
+            </li>
+            <li 
+              className={`menu-item ${activeTab === 'rekap-batch-ba' ? 'active' : ''}`}
+              onClick={() => { setActiveTab('rekap-batch-ba'); fetchRekapBatchBA(); }}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+              Rekap Batch BA
             </li>
             <li 
               className={`menu-item ${activeTab === 'global-search' ? 'active' : ''}`}
@@ -5006,6 +5069,210 @@ function App() {
                   {renderRekapTable(murniStages, 'Tabel Invers Murni')}
                   {renderRekapTable(penggantiStages, 'Tabel Invers Pengganti')}
                   {renderRekapTable(sortedRekapStages, 'Tabel Keseluruhan')}
+                </>
+              );
+            })()}
+          </div>
+        )}
+
+        {/* Rekap Batch Berita Acara View */}
+        {activeTab === 'rekap-batch-ba' && (
+          <div className="rekap-keseluruhan-page">
+            <div className="section-header" style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h2 style={{ fontSize: '1.3rem', fontWeight: '700', color: 'var(--text-primary)' }}>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "6px", verticalAlign: "middle" }}><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>Rekap Batch Berita Acara
+                </h2>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                  Rekapitulasi verifikasi per Batch Berita Acara di masing-masing Tahap INVERS. Hanya menampilkan batch Berita Acara yang sudah ditandai "Sudah Terbit".
+                </p>
+              </div>
+              {!rekapBatchLoading && rekapBatchData && rekapBatchData.stages.length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <button 
+                    className="btn btn-secondary btn-sm"
+                    onClick={handleExportRekapBatchBA}
+                    style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: '600' }}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                    Ekspor Rekap Excel
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {rekapBatchLoading && (
+              <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-muted)' }}>
+                <div className="spinner" style={{ margin: '0 auto 16px' }}></div>
+                Memuat data rekap batch...
+              </div>
+            )}
+
+            {!rekapBatchLoading && rekapBatchData && rekapBatchData.stages.length === 0 && (
+              <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-muted)' }}>
+                Belum ada data batch Berita Acara yang tersedia.
+              </div>
+            )}
+
+            {!rekapBatchLoading && rekapBatchData && rekapBatchData.stages.length > 0 && (() => {
+              const allStages = [...rekapBatchData.stages];
+              const murniStages = allStages
+                .filter(s => s.stage_type !== 'pengganti')
+                .sort((a, b) => (parseInt(a.stage_name.replace(/\D/g, '')) || 0) - (parseInt(b.stage_name.replace(/\D/g, '')) || 0));
+              const penggantiStages = allStages
+                .filter(s => s.stage_type === 'pengganti')
+                .sort((a, b) => (parseInt(a.stage_name.replace(/\D/g, '')) || 0) - (parseInt(b.stage_name.replace(/\D/g, '')) || 0));
+
+              const renderRekapBatchTable = (groupStages, label) => {
+                if (groupStages.length === 0) return null;
+                return (
+                  <div key={label} style={{ marginBottom: '40px' }}>
+                    <div className="rekap-section-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span>{label}</span>
+                    </div>
+                    <div className="rekap-scroll-container" style={{ border: '1px solid var(--border)', borderRadius: '8px', overflow: 'auto' }}>
+                      <table className="rekap-table-unified">
+                        <thead>
+                          {/* Row 1: Corner + Stages */}
+                          <tr>
+                            <th className="rekap-batch-corner" rowSpan="3" style={{ left: 0, width: '45px', minWidth: '45px', maxWidth: '45px' }}>No</th>
+                            <th className="rekap-batch-corner" rowSpan="3" style={{ left: '45px', width: '220px', minWidth: '220px', maxWidth: '220px', textAlign: 'left', borderRight: '2px solid var(--border)' }}>Kabupaten / Kota</th>
+                            {groupStages.map(stage => {
+                              const batchCount = stage.batches.length;
+                              if (batchCount === 0) return null;
+                              return (
+                                <th 
+                                  key={stage.stage_id} 
+                                  colSpan={batchCount * 3} 
+                                  className="rekap-batch-th-level1"
+                                >
+                                  {stage.stage_name.toUpperCase()}
+                                </th>
+                              );
+                            })}
+                          </tr>
+                          {/* Row 2: Batches */}
+                          <tr>
+                            {groupStages.map(stage => 
+                              stage.batches.map(batch => (
+                                <th 
+                                  key={batch.batch_id} 
+                                  colSpan="3" 
+                                  className="rekap-batch-th-level2"
+                                >
+                                  <div style={{ fontWeight: 700, fontSize: '0.8rem' }}>{batch.batch_name.toUpperCase()}</div>
+                                  <div style={{ fontWeight: 500, fontSize: '0.66rem', marginTop: '2px', opacity: 0.85 }}>
+                                    No: {batch.nomor_ba || '—'}
+                                  </div>
+                                  <div style={{ fontWeight: 500, fontSize: '0.66rem', opacity: 0.85 }}>
+                                    Tgl: {batch.tanggal_ba || '—'}
+                                  </div>
+                                </th>
+                              ))
+                            )}
+                          </tr>
+                          {/* Row 3: Metrics */}
+                          <tr>
+                            {groupStages.map(stage => 
+                              stage.batches.map(batch => (
+                                <React.Fragment key={batch.batch_id}>
+                                  <th className="rekap-batch-th-level3 rekap-batch-sub-verif">VERIFIKASI</th>
+                                  <th className="rekap-batch-th-level3 rekap-batch-sub-lolos">LOLOS</th>
+                                  <th className="rekap-batch-th-level3 rekap-batch-sub-tidak" style={{ borderRight: '2px solid var(--border)' }}>TIDAK LOLOS</th>
+                                </React.Fragment>
+                              ))
+                            )}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rekapBatchData.all_kabupaten.map((kab, kabIdx) => {
+                            const hasAnyData = groupStages.some(stage => 
+                              stage.batches.some(batch => {
+                                const kd = batch.kabupaten_data[kabIdx];
+                                return kd && kd.verifikasi > 0;
+                              })
+                            );
+                            return (
+                              <tr key={kabIdx} className={!hasAnyData ? 'rekap-row-empty' : ''}>
+                                <td className="rekap-frozen-no" style={{ width: '45px', minWidth: '45px', maxWidth: '45px', left: 0 }}>{kabIdx + 1}</td>
+                                <td className="rekap-frozen-kab" style={{ width: '220px', minWidth: '220px', maxWidth: '220px', left: '45px', borderRight: '2px solid var(--border)' }}>{kab}</td>
+                                {groupStages.map(stage => 
+                                  stage.batches.map(batch => {
+                                    const kd = batch.kabupaten_data[kabIdx];
+                                    const v = kd?.verifikasi || 0;
+                                    const l = kd?.lolos || 0;
+                                    const tl = kd?.tidak_lolos || 0;
+                                    return (
+                                      <React.Fragment key={batch.batch_id}>
+                                        <td className="rekap-cell rekap-batch-cell-verif">
+                                          {v > 0 ? (
+                                            <button className="rekap-link" onClick={() => navigateToData('verified', { kab, tahap: stage.stage_id })}>
+                                              {v}
+                                            </button>
+                                          ) : '-'}
+                                        </td>
+                                        <td className="rekap-cell rekap-batch-cell-lolos">
+                                          {l > 0 ? (
+                                            <button className="rekap-link" onClick={() => navigateToData('verified', { kab, tahap: stage.stage_id, status: 'LOLOS' })}>
+                                              {l}
+                                            </button>
+                                          ) : '-'}
+                                        </td>
+                                        <td className="rekap-cell rekap-batch-cell-tidak" style={{ borderRight: '2px solid var(--border)' }}>
+                                          {tl > 0 ? (
+                                            <button className="rekap-link" onClick={() => navigateToData('verified', { kab, tahap: stage.stage_id, status: 'TIDAK_LOLOS' })}>
+                                              {tl}
+                                            </button>
+                                          ) : '-'}
+                                        </td>
+                                      </React.Fragment>
+                                    );
+                                  })
+                                )}
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                        <tfoot>
+                          <tr className="rekap-footer-row">
+                            <td className="rekap-footer-frozen" style={{ left: 0, width: '45px', minWidth: '45px', maxWidth: '45px' }}></td>
+                            <td className="rekap-footer-frozen" style={{ left: '45px', width: '220px', minWidth: '220px', maxWidth: '220px', fontWeight: 700, textAlign: 'left', borderRight: '2px solid var(--border)' }}>TOTAL</td>
+                            {groupStages.map(stage => 
+                              stage.batches.map(batch => {
+                                const t = batch.totals;
+                                return (
+                                  <React.Fragment key={batch.batch_id}>
+                                    <td className="rekap-footer-cell rekap-batch-cell-verif">
+                                      {t.verifikasi > 0 ? (
+                                        <button className="rekap-link" onClick={() => navigateToData('verified', { tahap: stage.stage_id })}>{t.verifikasi}</button>
+                                      ) : 0}
+                                    </td>
+                                    <td className="rekap-footer-cell rekap-batch-cell-lolos">
+                                      {t.lolos > 0 ? (
+                                        <button className="rekap-link" onClick={() => navigateToData('verified', { tahap: stage.stage_id, status: 'LOLOS' })}>{t.lolos}</button>
+                                      ) : 0}
+                                    </td>
+                                    <td className="rekap-footer-cell rekap-batch-cell-tidak" style={{ borderRight: '2px solid var(--border)' }}>
+                                      {t.tidak_lolos > 0 ? (
+                                        <button className="rekap-link" onClick={() => navigateToData('verified', { tahap: stage.stage_id, status: 'TIDAK_LOLOS' })}>{t.tidak_lolos}</button>
+                                      ) : 0}
+                                    </td>
+                                  </React.Fragment>
+                                );
+                              })
+                            )}
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </div>
+                );
+              };
+
+              return (
+                <>
+                  {renderRekapBatchTable(murniStages, 'Tabel Rekap Batch Murni')}
+                  {renderRekapBatchTable(penggantiStages, 'Tabel Rekap Batch Pengganti')}
                 </>
               );
             })()}
