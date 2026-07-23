@@ -388,6 +388,70 @@ function App() {
   const [previewTab, setPreviewTab] = useState('lolos');
   const [previewSearchTerm, setPreviewSearchTerm] = useState('');
 
+  // State Rename Modal (Stage & Batch)
+  const [showRenameModal, setShowRenameModal] = useState(false);
+  const [renameTarget, setRenameTarget] = useState({ type: '', id: null, currentName: '' });
+  const [newRenameName, setNewRenameName] = useState('');
+  const [renameLoading, setRenameLoading] = useState(false);
+
+  const openRenameStageModal = (stageId, currentName) => {
+    setRenameTarget({ type: 'stage', id: stageId, currentName });
+    setNewRenameName(currentName);
+    setShowRenameModal(true);
+  };
+
+  const openRenameBatchModal = (batchId, currentName) => {
+    setRenameTarget({ type: 'batch', id: batchId, currentName });
+    setNewRenameName(currentName);
+    setShowRenameModal(true);
+  };
+
+  const handleSaveRename = async () => {
+    const trimmed = newRenameName.trim();
+    if (!trimmed) {
+      showToast("Nama tidak boleh kosong", "error");
+      return;
+    }
+    if (trimmed === renameTarget.currentName) {
+      setShowRenameModal(false);
+      return;
+    }
+
+    setRenameLoading(true);
+    try {
+      if (renameTarget.type === 'stage') {
+        const res = await fetch(`${BACKEND_URL}/api/stage/${renameTarget.id}/rename`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: trimmed })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Gagal mengubah nama tahap");
+        showToast(data.message || "Nama Tahap berhasil diperbarui!");
+        fetchStages();
+        fetchStageData(renameTarget.id);
+        if (activeTab === 'rekap-keseluruhan') fetchRekapKeseluruhan();
+        if (activeTab === 'rekap-batch-ba') fetchRekapBatchBA();
+      } else if (renameTarget.type === 'batch') {
+        const res = await fetch(`${BACKEND_URL}/api/verified/batch/${renameTarget.id}/rename`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: trimmed })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Gagal mengubah nama batch");
+        showToast(data.message || "Nama Batch berhasil diperbarui!");
+        fetchStageData(selectedStageId);
+        if (activeTab === 'rekap-batch-ba') fetchRekapBatchBA();
+      }
+      setShowRenameModal(false);
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      setRenameLoading(false);
+    }
+  };
+
   // State SK Dirjen
   const [skDirjenActiveSubTab, setSkDirjenActiveSubTab] = useState('daftar-pb');
   const [skDirjenSubmenuOpen, setSkDirjenSubmenuOpen] = useState(false);
@@ -2346,7 +2410,20 @@ function App() {
         {/* Header Bar */}
         <header className="header-bar">
           <div className="header-title">
-            <h1>{selectedStageName}</h1>
+            <h1 style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              {selectedStageName}
+              {selectedStageId && (
+                <button
+                  className="btn btn-secondary btn-sm"
+                  style={{ padding: '2px 8px', fontSize: '0.72rem', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px', verticalAlign: 'middle' }}
+                  onClick={() => openRenameStageModal(selectedStageId, selectedStageName)}
+                  title="Ubah Nama Tahap INVERS"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+                  Ubah Nama Tahap
+                </button>
+              )}
+            </h1>
             <p>Sistem Database Verifikasi Perumahan Swadaya</p>
           </div>
 
@@ -2601,6 +2678,13 @@ function App() {
                                   <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "4px", verticalAlign: "middle" }}><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>Preview
                                 </button>
                                 <button 
+                                  className="btn btn-secondary btn-sm" 
+                                  onClick={() => openRenameBatchModal(b.id, b.name)}
+                                  title="Ubah Nama Berita Acara / Batch"
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "4px", verticalAlign: "middle" }}><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>Ubah Nama
+                                </button>
+                                <button 
                                   className="btn btn-danger btn-sm"
                                   onClick={() => handleDeleteBatch(b.id)}
                                 >
@@ -2610,38 +2694,36 @@ function App() {
                             </td>
                           </tr>
                           {isExpanded && (
-                            <tr className="batch-breakdown-row">
-                              <td colSpan="8" style={{ padding: '0 16px 12px 32px' }}>
-                                <div className="batch-breakdown-inner">
-                                  <table className="data-table" style={{ margin: 0 }}>
-                                    <thead>
-                                      <tr>
-                                        <th>Kabupaten / Kota</th>
-                                        <th>Lolos</th>
-                                        <th>Tidak Lolos</th>
-                                        <th>CPB Pengganti</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      {breakdown.length > 0 ? breakdown.map((row, idx) => (
-                                        <tr key={idx}>
-                                          <td style={{ fontWeight: '600' }}>{row.kabupaten}</td>
-                                          <td>{row.lolos} CPB</td>
-                                          <td>{row.tidak_lolos} CPB</td>
-                                          <td>{row.replacement} CPB</td>
-                                        </tr>
-                                      )) : (
-                                        <tr>
-                                          <td colSpan="4" style={{ textAlign: 'center', padding: '12px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                                            Memuat data kabupaten...
-                                          </td>
-                                        </tr>
-                                      )}
-                                    </tbody>
-                                  </table>
-                                </div>
-                              </td>
-                            </tr>
+                            <>
+                              <tr className="batch-breakdown-header-row">
+                                <td colSpan="2" style={{ paddingLeft: '32px', fontWeight: '600', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                                  KABUPATEN / KOTA
+                                </td>
+                                <td style={{ fontWeight: '600', fontSize: '0.78rem', color: 'var(--text-muted)' }}>LOLOS</td>
+                                <td style={{ fontWeight: '600', fontSize: '0.78rem', color: 'var(--text-muted)' }}>TIDAK LOLOS</td>
+                                <td style={{ fontWeight: '600', fontSize: '0.78rem', color: 'var(--text-muted)' }}>CPB PENGGANTI</td>
+                                <td style={{ fontWeight: '600', fontSize: '0.78rem', color: 'var(--text-muted)' }}>JUMLAH VERIFIKASI</td>
+                                <td colSpan="2"></td>
+                              </tr>
+                              {breakdown.length > 0 ? breakdown.map((row, idx) => (
+                                <tr key={idx} className="batch-breakdown-data-row">
+                                  <td colSpan="2" style={{ paddingLeft: '36px', fontWeight: '500' }}>
+                                    <span style={{ color: 'var(--primary)', marginRight: '6px', fontSize: '0.85rem' }}>↳</span>{row.kabupaten}
+                                  </td>
+                                  <td>{row.lolos} CPB</td>
+                                  <td>{row.tidak_lolos} CPB</td>
+                                  <td>{row.replacement} CPB</td>
+                                  <td style={{ fontWeight: '600' }}>{row.lolos + row.tidak_lolos} CPB</td>
+                                  <td colSpan="2"></td>
+                                </tr>
+                              )) : (
+                                <tr className="batch-breakdown-data-row">
+                                  <td colSpan="8" style={{ textAlign: 'center', padding: '12px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                                    Memuat data kabupaten...
+                                  </td>
+                                </tr>
+                              )}
+                            </>
                           )}
                         </React.Fragment>
                       );
@@ -3519,9 +3601,9 @@ function App() {
                               <tr key={s.invers.no_ktp} style={{ backgroundColor: selectedSuggestions.has(i) ? '#eff6ff' : '#fff' }}>
                                 <td style={{ textAlign: 'center' }}><input type="checkbox" checked={selectedSuggestions.has(i)} onChange={(e) => { const next = new Set(selectedSuggestions); if (e.target.checked) next.add(i); else next.delete(i); setSelectedSuggestions(next); }} /></td>
                                 <td style={{ fontWeight: 600 }}>{s.invers.nama}</td>
-                                <td style={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{s.invers.no_ktp}</td>
+                                <td className="mono-digit">{s.invers.no_ktp}</td>
                                 <td>{s.verified.nama}</td>
-                                <td style={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{s.verified.no_ktp}</td>
+                                <td className="mono-digit">{s.verified.no_ktp}</td>
                                 <td>{s.invers.desa_kelurahan}</td>
                               </tr>
                             ))}</tbody>
@@ -3600,10 +3682,10 @@ function App() {
                           return (
                             <tr key={mp.id}>
                               <td style={{ textAlign: 'center' }}>{rowNum}</td>
-                              <td style={{ fontFamily: 'monospace' }}>{mp.invers_nik}</td>
+                              <td className="mono-digit">{mp.invers_nik}</td>
                               <td>{mp.invers_nama}</td>
                               <td>{mp.invers_kabupaten}</td>
-                              <td style={{ fontFamily: 'monospace' }}>{mp.verified_nik}</td>
+                              <td className="mono-digit">{mp.verified_nik}</td>
                               <td>{mp.verified_nama}</td>
                               <td><span style={{ padding: '2px 8px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: '600', backgroundColor: mp.verified_status === 'LOLOS' ? '#d4edda' : '#f8d7da', color: mp.verified_status === 'LOLOS' ? '#155724' : '#721c24' }}>{mp.verified_status}</span></td>
                               <td><button className="btn btn-danger btn-sm" onClick={() => handleUnpairInvers(mp.id)} style={{ fontSize: '0.75rem', padding: '3px 8px' }}>Hapus</button></td>
@@ -4596,8 +4678,8 @@ function App() {
                         <td style={{ textAlign: 'center', color: 'var(--text-muted)' }}>{(globalData.page - 1) * 30 + idx + 1}</td>
                         <td><span className="tahap-badge">{rec.tahap_name}</span></td>
                         <td style={{ fontWeight: '500' }}>{rec.nama}</td>
-                        <td style={{ fontFamily: 'monospace', fontSize: '0.85em' }}>{rec.no_ktp}</td>
-                        <td style={{ fontFamily: 'monospace', fontSize: '0.85em' }}>{rec.no_kk}</td>
+                        <td className="mono-digit">{rec.no_ktp}</td>
+                        <td className="mono-digit">{rec.no_kk}</td>
                         <td>{rec.kabupaten_kota}</td>
                         <td>{rec.desa_kelurahan}</td>
                         <td>
@@ -4670,7 +4752,7 @@ function App() {
                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
                     Ekspor Rekap Excel
                   </button>
-                  <div className="rekap-progress-legend" style={{ margin: 0, background: '#ffffff', padding: '10px 16px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                  <div className="rekap-progress-legend" style={{ margin: 0, background: 'var(--bg-card)', color: 'var(--text-primary)', padding: '10px 16px', borderRadius: '8px', border: '1px solid var(--border)' }}>
                     <span className="rekap-legend-item"><span className="rekap-legend-dot rekap-seg-lolos"></span> Lolos</span>
                     <span className="rekap-legend-item"><span className="rekap-legend-dot rekap-seg-tidak-lolos"></span> Tidak Lolos</span>
                     <span className="rekap-legend-item"><span className="rekap-legend-dot rekap-seg-belum"></span> Belum Verifikasi</span>
@@ -5136,7 +5218,7 @@ function App() {
                           {/* Row 1: Corner + Stages */}
                           <tr>
                             <th className="rekap-batch-corner" rowSpan="3" style={{ left: 0, width: '45px', minWidth: '45px', maxWidth: '45px' }}>No</th>
-                            <th className="rekap-batch-corner" rowSpan="3" style={{ left: '45px', width: '220px', minWidth: '220px', maxWidth: '220px', textAlign: 'left', borderRight: '2px solid var(--border)' }}>Kabupaten / Kota</th>
+                            <th className="rekap-batch-corner rekap-batch-border-stage" rowSpan="3" style={{ left: '45px', width: '220px', minWidth: '220px', maxWidth: '220px', textAlign: 'left' }}>Kabupaten / Kota</th>
                             {groupStages.map(stage => {
                               const batchCount = stage.batches.length;
                               if (batchCount === 0) return null;
@@ -5144,7 +5226,7 @@ function App() {
                                 <th 
                                   key={stage.stage_id} 
                                   colSpan={batchCount * 3} 
-                                  className="rekap-batch-th-level1"
+                                  className="rekap-batch-th-level1 rekap-batch-border-stage"
                                 >
                                   {stage.stage_name.toUpperCase()}
                                 </th>
@@ -5154,33 +5236,41 @@ function App() {
                           {/* Row 2: Batches */}
                           <tr>
                             {groupStages.map(stage => 
-                              stage.batches.map(batch => (
-                                <th 
-                                  key={batch.batch_id} 
-                                  colSpan="3" 
-                                  className="rekap-batch-th-level2"
-                                >
-                                  <div style={{ fontWeight: 700, fontSize: '0.8rem' }}>{batch.batch_name.toUpperCase()}</div>
-                                  <div style={{ fontWeight: 500, fontSize: '0.66rem', marginTop: '2px', opacity: 0.85 }}>
-                                    No: {batch.nomor_ba || '—'}
-                                  </div>
-                                  <div style={{ fontWeight: 500, fontSize: '0.66rem', opacity: 0.85 }}>
-                                    Tgl: {batch.tanggal_ba || '—'}
-                                  </div>
-                                </th>
-                              ))
+                              stage.batches.map((batch, bIdx) => {
+                                const isLastBatchInStage = bIdx === stage.batches.length - 1;
+                                const borderClass = isLastBatchInStage ? 'rekap-batch-border-stage' : 'rekap-batch-border-ba';
+                                return (
+                                  <th 
+                                    key={batch.batch_id} 
+                                    colSpan="3" 
+                                    className={`rekap-batch-th-level2 ${borderClass}`}
+                                  >
+                                    <div style={{ fontWeight: 700, fontSize: '0.8rem' }}>{batch.batch_name.toUpperCase()}</div>
+                                    <div style={{ fontWeight: 500, fontSize: '0.66rem', marginTop: '2px', opacity: 0.85 }}>
+                                      No: {batch.nomor_ba || '—'}
+                                    </div>
+                                    <div style={{ fontWeight: 500, fontSize: '0.66rem', opacity: 0.85 }}>
+                                      Tgl: {batch.tanggal_ba || '—'}
+                                    </div>
+                                  </th>
+                                );
+                              })
                             )}
                           </tr>
                           {/* Row 3: Metrics */}
                           <tr>
                             {groupStages.map(stage => 
-                              stage.batches.map(batch => (
-                                <React.Fragment key={batch.batch_id}>
-                                  <th className="rekap-batch-th-level3 rekap-batch-sub-verif">VERIFIKASI</th>
-                                  <th className="rekap-batch-th-level3 rekap-batch-sub-lolos">LOLOS</th>
-                                  <th className="rekap-batch-th-level3 rekap-batch-sub-tidak" style={{ borderRight: '2px solid var(--border)' }}>TIDAK LOLOS</th>
-                                </React.Fragment>
-                              ))
+                              stage.batches.map((batch, bIdx) => {
+                                const isLastBatchInStage = bIdx === stage.batches.length - 1;
+                                const borderClass = isLastBatchInStage ? 'rekap-batch-border-stage' : 'rekap-batch-border-ba';
+                                return (
+                                  <React.Fragment key={batch.batch_id}>
+                                    <th className="rekap-batch-th-level3 rekap-batch-sub-verif">VERIFIKASI</th>
+                                    <th className="rekap-batch-th-level3 rekap-batch-sub-lolos">LOLOS</th>
+                                    <th className={`rekap-batch-th-level3 rekap-batch-sub-tidak ${borderClass}`}>TIDAK LOLOS</th>
+                                  </React.Fragment>
+                                );
+                              })
                             )}
                           </tr>
                         </thead>
@@ -5195,9 +5285,11 @@ function App() {
                             return (
                               <tr key={kabIdx} className={!hasAnyData ? 'rekap-row-empty' : ''}>
                                 <td className="rekap-frozen-no" style={{ width: '45px', minWidth: '45px', maxWidth: '45px', left: 0 }}>{kabIdx + 1}</td>
-                                <td className="rekap-frozen-kab" style={{ width: '220px', minWidth: '220px', maxWidth: '220px', left: '45px', borderRight: '2px solid var(--border)' }}>{kab}</td>
+                                <td className="rekap-frozen-kab rekap-batch-border-stage" style={{ width: '220px', minWidth: '220px', maxWidth: '220px', left: '45px' }}>{kab}</td>
                                 {groupStages.map(stage => 
-                                  stage.batches.map(batch => {
+                                  stage.batches.map((batch, bIdx) => {
+                                    const isLastBatchInStage = bIdx === stage.batches.length - 1;
+                                    const borderClass = isLastBatchInStage ? 'rekap-batch-border-stage' : 'rekap-batch-border-ba';
                                     const kd = batch.kabupaten_data[kabIdx];
                                     const v = kd?.verifikasi || 0;
                                     const l = kd?.lolos || 0;
@@ -5218,7 +5310,7 @@ function App() {
                                             </button>
                                           ) : '-'}
                                         </td>
-                                        <td className="rekap-cell rekap-batch-cell-tidak" style={{ borderRight: '2px solid var(--border)' }}>
+                                        <td className={`rekap-cell rekap-batch-cell-tidak ${borderClass}`}>
                                           {tl > 0 ? (
                                             <button className="rekap-link" onClick={() => navigateToData('verified', { kab, tahap: stage.stage_id, status: 'TIDAK_LOLOS' })}>
                                               {tl}
@@ -5236,9 +5328,11 @@ function App() {
                         <tfoot>
                           <tr className="rekap-footer-row">
                             <td className="rekap-footer-frozen" style={{ left: 0, width: '45px', minWidth: '45px', maxWidth: '45px' }}></td>
-                            <td className="rekap-footer-frozen" style={{ left: '45px', width: '220px', minWidth: '220px', maxWidth: '220px', fontWeight: 700, textAlign: 'left', borderRight: '2px solid var(--border)' }}>TOTAL</td>
+                            <td className="rekap-footer-frozen rekap-batch-border-stage" style={{ left: '45px', width: '220px', minWidth: '220px', maxWidth: '220px', fontWeight: 700, textAlign: 'left' }}>TOTAL</td>
                             {groupStages.map(stage => 
-                              stage.batches.map(batch => {
+                              stage.batches.map((batch, bIdx) => {
+                                const isLastBatchInStage = bIdx === stage.batches.length - 1;
+                                const borderClass = isLastBatchInStage ? 'rekap-batch-border-stage' : 'rekap-batch-border-ba';
                                 const t = batch.totals;
                                 return (
                                   <React.Fragment key={batch.batch_id}>
@@ -5252,7 +5346,7 @@ function App() {
                                         <button className="rekap-link" onClick={() => navigateToData('verified', { tahap: stage.stage_id, status: 'LOLOS' })}>{t.lolos}</button>
                                       ) : 0}
                                     </td>
-                                    <td className="rekap-footer-cell rekap-batch-cell-tidak" style={{ borderRight: '2px solid var(--border)' }}>
+                                    <td className={`rekap-footer-cell rekap-batch-cell-tidak ${borderClass}`}>
                                       {t.tidak_lolos > 0 ? (
                                         <button className="rekap-link" onClick={() => navigateToData('verified', { tahap: stage.stage_id, status: 'TIDAK_LOLOS' })}>{t.tidak_lolos}</button>
                                       ) : 0}
@@ -5278,6 +5372,46 @@ function App() {
             })()}
           </div>
         )}
+
+      {/* Rename Modal (Stage & Batch) */}
+      {showRenameModal && (
+        <div className="modal-overlay" onClick={() => setShowRenameModal(false)}>
+          <div className="modal-content" style={{ maxWidth: '440px' }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "8px", verticalAlign: "middle" }}><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+                {renameTarget.type === 'stage' ? 'Ubah Nama Tahap INVERS' : 'Ubah Nama Berita Acara / Batch'}
+              </h3>
+              <button className="modal-close" onClick={() => setShowRenameModal(false)}>&times;</button>
+            </div>
+            <div className="modal-body" style={{ padding: '20px' }}>
+              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '8px', color: 'var(--text-primary)' }}>
+                {renameTarget.type === 'stage' ? 'Nama Tahap Baru:' : 'Nama Berita Acara / Batch Baru:'}
+              </label>
+              <input
+                type="text"
+                className="search-input"
+                style={{ width: '100%', padding: '10px 14px', fontSize: '0.9rem', borderRadius: '6px', border: '1px solid var(--border)' }}
+                value={newRenameName}
+                onChange={(e) => setNewRenameName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleSaveRename(); }}
+                autoFocus
+              />
+              <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '10px', lineHeight: 1.4 }}>
+                Perubahan nama ini akan diperbarui secara otomatis di seluruh antarmuka, laporan rekapitulasi, cetak dokumen, dan berkas ekspor Excel.
+              </p>
+            </div>
+            <div className="modal-footer" style={{ padding: '12px 20px', display: 'flex', justifyContent: 'flex-end', gap: '10px', borderTop: '1px solid var(--border)' }}>
+              <button className="btn btn-secondary" onClick={() => setShowRenameModal(false)} disabled={renameLoading}>
+                Batal
+              </button>
+              <button className="btn btn-primary" onClick={handleSaveRename} disabled={renameLoading}>
+                {renameLoading ? 'Menyimpan...' : 'Simpan Perubahan'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Excel Preview Modal */}
       {showPreviewModal && previewData && (

@@ -674,6 +674,30 @@ def save_batch_metadata(batch_id: int, body: dict = Body(...)):
     conn.close()
     return {"status": "success", "message": "Metadata batch berhasil disimpan"}
 
+@app.post("/api/verified/batch/{batch_id}/rename")
+def rename_batch(batch_id: int, body: dict = Body(...)):
+    new_name = body.get("name", "").strip()
+    if not new_name:
+        raise HTTPException(status_code=400, detail="Nama Berita Acara / Batch tidak boleh kosong")
+        
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT id FROM verified_batches WHERE id = ?", (batch_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Batch tidak ditemukan")
+            
+        cursor.execute("UPDATE verified_batches SET name = ? WHERE id = ?", (new_name, batch_id))
+        conn.commit()
+    except HTTPException:
+        conn.close()
+        raise
+    except Exception as e:
+        conn.close()
+        raise HTTPException(status_code=500, detail=f"Gagal mengubah nama batch: {str(e)}")
+    conn.close()
+    return {"batch_id": batch_id, "name": new_name, "message": "Nama Berita Acara / Batch berhasil diperbarui"}
+
 @app.get("/api/stage/{stage_id}/records")
 def get_stage_records(stage_id: int):
     conn = get_db_connection()
@@ -1161,6 +1185,40 @@ def delete_stage(stage_id: int):
         raise HTTPException(status_code=500, detail=f"Gagal menghapus tahap: {str(e)}")
     conn.close()
     return {"message": f"Tahap '{stage_name}' berhasil dihapus beserta semua data terkait"}
+
+@app.post("/api/stage/{stage_id}/rename")
+def rename_stage(stage_id: int, body: dict = Body(...)):
+    new_name = body.get("name", "").strip()
+    if not new_name:
+        raise HTTPException(status_code=400, detail="Nama Tahap INVERS tidak boleh kosong")
+        
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT id, name FROM invers_stages WHERE id = ?", (stage_id,))
+        stage = cursor.fetchone()
+        if not stage:
+            raise HTTPException(status_code=404, detail="Tahap tidak ditemukan")
+            
+        cursor.execute("SELECT id FROM invers_stages WHERE LOWER(name) = LOWER(?) AND id != ?", (new_name, stage_id))
+        if cursor.fetchone():
+            raise HTTPException(status_code=400, detail=f"Nama Tahap '{new_name}' sudah digunakan")
+            
+        cursor.execute("UPDATE invers_stages SET name = ? WHERE id = ?", (new_name, stage_id))
+        cursor.execute("""
+            UPDATE invers_records 
+            SET tahap = ? 
+            WHERE revision_id IN (SELECT id FROM invers_revisions WHERE stage_id = ?)
+        """, (new_name, stage_id))
+        conn.commit()
+    except HTTPException:
+        conn.close()
+        raise
+    except Exception as e:
+        conn.close()
+        raise HTTPException(status_code=500, detail=f"Gagal mengubah nama tahap: {str(e)}")
+    conn.close()
+    return {"stage_id": stage_id, "name": new_name, "message": "Nama Tahap INVERS berhasil diperbarui"}
 
 @app.get("/api/templates/download/{template_type}")
 def download_template(template_type: str):

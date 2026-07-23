@@ -470,15 +470,14 @@ body {
   background-color: #fee2e2;
 }
 
-/* Monospace font class for clean data reading */
+/* Monospace font class for clean data reading (uses same font & size as Name) */
 .mono-digit {
-  font-family: var(--font-family);
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum";
-  letter-spacing: 0.02em;
-  font-weight: 500;
-  color: #334155;
-  font-size: 0.85rem;
 }
 
 /* Styling for numeric digit reading in Rekap Tables (uses normal sans-serif font) */
@@ -489,32 +488,29 @@ body {
   font-size: 0.85rem;
 }
 
-/* Batch Kabupaten Breakdown sub-row */
-.batch-breakdown-row {
-  background-color: #f8f9fa !important;
+/* Batch Kabupaten Breakdown sub-rows */
+.batch-breakdown-header-row {
+  background-color: #f1f5f9 !important;
 }
 
-.batch-breakdown-row:hover {
-  background-color: #f0f1f2 !important;
+.batch-breakdown-header-row td {
+  padding: 6px 12px !important;
+  border-top: 1px solid #cbd5e1;
+  border-bottom: 1px solid #cbd5e1;
 }
 
-.batch-breakdown-inner {
-  border-left: 3px solid var(--primary);
-  padding-left: 12px;
-}
-
-.batch-breakdown-inner .data-table {
+.batch-breakdown-data-row {
+  background-color: #f8fafc !important;
   font-size: 0.85rem;
 }
 
-.batch-breakdown-inner .data-table th {
-  background-color: #e9ecef;
-  font-size: 0.8rem;
-  padding: 8px 12px;
+.batch-breakdown-data-row:hover {
+  background-color: #f1f5f9 !important;
 }
 
-.batch-breakdown-inner .data-table td {
-  padding: 6px 12px;
+.batch-breakdown-data-row td {
+  padding: 7px 12px !important;
+  border-bottom: 1px solid #e2e8f0;
 }
 
 /* Custom Tooltips for errors */
@@ -1619,8 +1615,8 @@ body {
   align-items: center;
   gap: 6px;
   font-size: 0.78rem;
-  color: var(--text-secondary);
-  font-weight: 500;
+  color: var(--text-primary);
+  font-weight: 600;
 }
 
 .rekap-legend-dot {
@@ -2447,6 +2443,18 @@ body {
 .dark .rekap-sub-lolos { background: #022c22; color: #6ee7b7; }
 .dark .rekap-sub-tidak { background: #431407; color: #fdba74; }
 .dark .rekap-sub-belum { background: #1e293b; color: #94a3b8; }
+.dark .rekap-sub-skdirjen-sudah { background: #064e3b !important; color: #6ee7b7 !important; }
+.dark .rekap-sub-skdirjen-belum { background: #7f1d1d !important; color: #fca5a5 !important; }
+.dark .sk-dirjen-badge.sudah {
+  background: rgba(34, 197, 94, 0.2);
+  color: #4ade80;
+  border: 1px solid rgba(34, 197, 94, 0.4);
+}
+.dark .sk-dirjen-badge.belum {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
 .dark .rekap-frozen-no {
   background: #0f172a !important;
   color: #e2e8f0;
@@ -2564,15 +2572,22 @@ body {
   color: #e2e8f0;
 }
 
-/* Batch breakdown row dark mode */
-.dark .batch-breakdown-row {
+/* Batch breakdown sub-rows dark mode */
+.dark .batch-breakdown-header-row {
   background-color: #1e293b !important;
 }
-.dark .batch-breakdown-row:hover {
-  background-color: #334155 !important;
+.dark .batch-breakdown-header-row td {
+  border-top: 1px solid #334155;
+  border-bottom: 1px solid #334155;
 }
-.dark .batch-breakdown-inner .data-table th {
-  background-color: #334155;
+.dark .batch-breakdown-data-row {
+  background-color: #0f172a !important;
+}
+.dark .batch-breakdown-data-row:hover {
+  background-color: #1e293b !important;
+}
+.dark .batch-breakdown-data-row td {
+  border-bottom: 1px solid #1e293b;
 }
 
 /* Tahap badge dark mode */
@@ -3037,5 +3052,22 @@ body {
 }
 .dark .rekap-table-unified tbody tr:hover td.rekap-batch-cell-tidak {
   background-color: #7f1d1d !important;
+}
+
+/* Rekap Batch BA Vertical Borders */
+.rekap-batch-border-ba {
+  border-right: 1.5px solid #cbd5e1 !important;
+}
+
+.dark .rekap-batch-border-ba {
+  border-right: 1.5px solid #334155 !important;
+}
+
+.rekap-batch-border-stage {
+  border-right: 3px solid #64748b !important;
+}
+
+.dark .rekap-batch-border-stage {
+  border-right: 3px solid #6ee7b7 !important;
 }
 
