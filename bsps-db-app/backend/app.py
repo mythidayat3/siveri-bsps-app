@@ -3639,6 +3639,11 @@ def export_excel(stage_id: int, batch_id: int = None):
     ws_ia = wb.active
     ws_ia.title = "Lamp.IA"
     ws_ia.views.sheetView[0].showGridLines = True
+    ws_ia.page_setup.orientation = ws_ia.ORIENTATION_PORTRAIT
+    ws_ia.page_margins.top = ws_ia.page_margins.bottom = ws_ia.page_margins.left = ws_ia.page_margins.right = 0.5
+    ws_ia.sheet_properties.pageSetUpPr.fitToPage = True
+    ws_ia.page_setup.fitToWidth = 1
+    ws_ia.page_setup.fitToHeight = 0
     
     ws_ia.append([])
     ws_ia.merge_cells("A2:F2")
@@ -3671,7 +3676,7 @@ def export_excel(stage_id: int, batch_id: int = None):
             cell.border = border_data
             cell.fill = fill_header_blue
             if r == 6 and c >= 4:
-                cell.font = Font(name=font_family, size=12, bold=True, color="FFFFFF")
+                cell.font = Font(name=font_family, size=12, bold=True, color="000000")
                 cell.fill = fill_header_blue if c == 4 else fill_header_red
                 
     row_num = 8
@@ -3719,6 +3724,12 @@ def export_excel(stage_id: int, batch_id: int = None):
     # --- Sheet 2: Lamp.IIA (Lolos) ---
     ws_iia = wb.create_sheet(title="Lamp.IIA")
     ws_iia.views.sheetView[0].showGridLines = True
+    ws_iia.page_setup.orientation = ws_iia.ORIENTATION_LANDSCAPE
+    ws_iia.page_margins.top = ws_iia.page_margins.bottom = ws_iia.page_margins.left = ws_iia.page_margins.right = 0.5
+    ws_iia.page_margins.header = ws_iia.page_margins.footer = 0.25
+    ws_iia.sheet_properties.pageSetUpPr.fitToPage = True
+    ws_iia.page_setup.fitToWidth = 1
+    ws_iia.page_setup.fitToHeight = 0
     
     ws_iia.append([])
     ws_iia.merge_cells("A2:P2")
@@ -3774,8 +3785,8 @@ def export_excel(stage_id: int, batch_id: int = None):
     ws_iia.column_dimensions['B'].width = 18       # KODE DESA
     ws_iia.column_dimensions['C'].width = 36.5     # NAMA
     ws_iia.column_dimensions['D'].width = 18       # JENIS KELAMIN
-    ws_iia.column_dimensions['E'].width = 20.5     # NO.KTP (NIK)
-    ws_iia.column_dimensions['F'].width = 20.5     # NO.KK
+    ws_iia.column_dimensions['E'].width = 27       # NO.KTP (NIK)
+    ws_iia.column_dimensions['F'].width = 27       # NO.KK
     ws_iia.column_dimensions['G'].width = 30       # ALAMAT TEMPAT TINGGAL
     ws_iia.column_dimensions['H'].width = 27       # DESA / KELURAHAN
     ws_iia.column_dimensions['I'].width = 27       # KECAMATAN
@@ -3784,6 +3795,12 @@ def export_excel(stage_id: int, batch_id: int = None):
     # --- Sheet 3: Lamp.IIIA (Tidak Lolos / Pengganti) ---
     ws_iiia = wb.create_sheet(title="Lamp.IIIA")
     ws_iiia.views.sheetView[0].showGridLines = True
+    ws_iiia.page_setup.orientation = ws_iiia.ORIENTATION_LANDSCAPE
+    ws_iiia.page_margins.top = ws_iiia.page_margins.bottom = ws_iiia.page_margins.left = ws_iiia.page_margins.right = 0.5
+    ws_iiia.page_margins.header = ws_iiia.page_margins.footer = 0.25
+    ws_iiia.sheet_properties.pageSetUpPr.fitToPage = True
+    ws_iiia.page_setup.fitToWidth = 1
+    ws_iiia.page_setup.fitToHeight = 0
     
     ws_iiia.append([])
     ws_iiia.merge_cells("A2:V2")
@@ -3876,16 +3893,16 @@ def export_excel(stage_id: int, batch_id: int = None):
     # Column widths sesuai permintaan user
     ws_iiia.column_dimensions['A'].width = 8        # NO.
     ws_iiia.column_dimensions['B'].width = 25       # NAMA (Tidak Lolos)
-    ws_iiia.column_dimensions['D'].width = 20.5     # NO.KTP (Tidak Lolos)
-    ws_iiia.column_dimensions['E'].width = 20.5     # NO.KK (Tidak Lolos)
+    ws_iiia.column_dimensions['D'].width = 27       # NO.KTP (Tidak Lolos)
+    ws_iiia.column_dimensions['E'].width = 27       # NO.KK (Tidak Lolos)
     ws_iiia.column_dimensions['F'].width = 30       # ALAMAT (Tidak Lolos)
     ws_iiia.column_dimensions['G'].width = 27       # DESA / KELURAHAN (Tidak Lolos)
     ws_iiia.column_dimensions['H'].width = 27       # KECAMATAN (Tidak Lolos)
     ws_iiia.column_dimensions['I'].width = 50       # KABUPATEN (Tidak Lolos)
     ws_iiia.column_dimensions['J'].width = 60       # ALASAN TIDAK LOLOS
     ws_iiia.column_dimensions['L'].width = 25       # NAMA (Pengganti)
-    ws_iiia.column_dimensions['N'].width = 20.5     # NO.KTP (Pengganti)
-    ws_iiia.column_dimensions['O'].width = 20.5     # NO.KK (Pengganti)
+    ws_iiia.column_dimensions['N'].width = 27       # NO.KTP (Pengganti)
+    ws_iiia.column_dimensions['O'].width = 27       # NO.KK (Pengganti)
     ws_iiia.column_dimensions['P'].width = 30       # ALAMAT (Pengganti)
     ws_iiia.column_dimensions['Q'].width = 27       # DESA / KELURAHAN (Pengganti)
     ws_iiia.column_dimensions['R'].width = 27       # KECAMATAN (Pengganti)

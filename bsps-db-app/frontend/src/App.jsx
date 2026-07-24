@@ -2246,16 +2246,16 @@ function App() {
       <aside className="sidebar">
         <div className="logo-container">
           <img src={logopkp} alt="Logo PKP" className="logo-img" />
-          <span className="logo-text">BSPS DB</span>
+          <span className="logo-text">SIVERI BSPS</span>
         </div>
 
         <div className="form-group" style={{ marginBottom: '24px' }}>
-          <label className="form-label" style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Tahap INVERS Aktif</label>
+          <label className="form-label" style={{ color: '#a7f3d0', fontSize: '0.8rem', fontWeight: '600' }}>Tahap INVERS Aktif</label>
           <select 
             className="form-input" 
             value={selectedStageId} 
             onChange={handleStageSelect}
-            style={{ padding: '8px 12px', fontSize: '0.85rem' }}
+            style={{ padding: '8px 12px', fontSize: '0.85rem', background: 'rgba(255, 255, 255, 0.15)', color: '#ffffff', border: '1px solid rgba(255, 255, 255, 0.25)' }}
           >
             {getSortedStages().map(s => (
               <option key={s.id} value={s.id}>{s.name} ({s.record_count} CPB)</option>
@@ -2379,14 +2379,14 @@ function App() {
           </ul>
         </nav>
 
-        <div style={{ marginTop: 'auto', padding: '8px' }}>
+        <div style={{ marginTop: 'auto', padding: '8px 0' }}>
           <button
             onClick={() => setDarkMode(!darkMode)}
             style={{
               display: 'flex', alignItems: 'center', gap: '8px', width: '100%',
               padding: '10px 12px', border: 'none', borderRadius: '8px', cursor: 'pointer',
-              background: darkMode ? 'var(--primary)' : 'var(--bg-main)',
-              color: darkMode ? 'white' : 'var(--text-main)',
+              background: 'rgba(255, 255, 255, 0.15)',
+              color: '#ffffff',
               fontSize: '0.85rem', fontWeight: '500', transition: 'var(--transition)'
             }}
             title={darkMode ? 'Mode Terang' : 'Mode Gelap'}
@@ -2398,8 +2398,8 @@ function App() {
             )}
             {darkMode ? 'Mode Terang' : 'Mode Gelap'}
           </button>
-          <div style={{ marginTop: '8px', fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center' }}>
-            Kementerian PUPR - BSPS DB v1.1.0
+          <div style={{ marginTop: '10px', fontSize: '0.72rem', color: '#a7f3d0', textAlign: 'center', fontWeight: '500' }}>
+            Kementerian PUPR - SIVERI BSPS v1.1.0
           </div>
         </div>
       </aside>
