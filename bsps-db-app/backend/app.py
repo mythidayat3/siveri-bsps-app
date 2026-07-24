@@ -50,6 +50,61 @@ def find_header_and_data(sheet):
         return headers, data_rows, header_row_idx
     return None, None, None
 
+@app.post("/api/login")
+def login(body: dict = Body(...)):
+    username = body.get("username", "").strip()
+    password = body.get("password", "").strip()
+
+    if not username or not password:
+        raise HTTPException(status_code=400, detail="Username dan password wajib diisi")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, username, password, role FROM users WHERE LOWER(username) = LOWER(?)", (username,))
+    user = cursor.fetchone()
+    conn.close()
+
+    if not user or user['password'] != password:
+        raise HTTPException(status_code=401, detail="Username atau password tidak valid")
+
+    return {
+        "id": user['id'],
+        "username": user['username'],
+        "role": user['role'],
+        "message": f"Selamat datang, {user['username']}!"
+    }
+
+@app.post("/api/change-password")
+def change_password(body: dict = Body(...)):
+    target_username = body.get("username", "").strip()
+    new_password = body.get("new_password", "").strip()
+
+    if not target_username or not new_password:
+        raise HTTPException(status_code=400, detail="Username dan password baru wajib diisi")
+
+    if len(new_password) < 4:
+        raise HTTPException(status_code=400, detail="Password minimal 4 karakter")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET password = ? WHERE LOWER(username) = LOWER(?)", (new_password, target_username))
+    if cursor.rowcount == 0:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Pengguna tidak ditemukan")
+
+    conn.commit()
+    conn.close()
+    return {"message": f"Password untuk '{target_username}' berhasil diperbarui"}
+
+@app.get("/api/users")
+def get_users():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, username, role, created_at FROM users ORDER BY id ASC")
+    users = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return users
+
 @app.get("/api/provinces")
 def get_provinces():
     conn = get_db_connection()

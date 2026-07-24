@@ -240,6 +240,23 @@ def init_db():
     )
     """)
     
+    # 12. Users Table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        password TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'viewer',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    # Seed default users if empty
+    cursor.execute("SELECT COUNT(*) as cnt FROM users")
+    if cursor.fetchone()['cnt'] == 0:
+        cursor.execute("INSERT INTO users (username, password, role) VALUES ('yayatbalai', 'semangat45', 'admin')")
+        cursor.execute("INSERT INTO users (username, password, role) VALUES ('balai_sul_3', 'balaimk5', 'viewer')")
+
     conn.commit()
     conn.close()
 

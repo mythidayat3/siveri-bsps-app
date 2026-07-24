@@ -203,6 +203,53 @@ function App() {
       return numA - numB;
     });
   };
+  // Auth & Session State
+  const [currentUser, setCurrentUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem('bsps_user');
+      return saved ? JSON.parse(saved) : null;
+    } catch { return null; }
+  });
+  const [loginUsername, setLoginUsername] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginLoading, setLoginLoading] = useState(false);
+
+  const isAdmin = currentUser?.role === 'admin';
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    if (!loginUsername || !loginPassword) {
+      showToast("Username dan password wajib diisi", "error");
+      return;
+    }
+    setLoginLoading(true);
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: loginUsername, password: loginPassword })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Gagal login");
+      
+      const userObj = { username: data.username, role: data.role };
+      setCurrentUser(userObj);
+      localStorage.setItem('bsps_user', JSON.stringify(userObj));
+      showToast(data.message || "Berhasil login!");
+      setLoginPassword('');
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    localStorage.removeItem('bsps_user');
+    showToast("Anda telah keluar dari akun");
+  };
+
   const [activeTab, setActiveTab] = useState('dashboard');
   const [stages, setStages] = useState([]);
   const [selectedStageId, setSelectedStageId] = useState('');
@@ -2134,6 +2181,115 @@ function App() {
   const totalVerifiedPages = Math.ceil(filteredVerified.length / ITEMS_PER_PAGE) || 1;
   const paginatedVerified = filteredVerified.slice((verifiedPage - 1) * ITEMS_PER_PAGE, verifiedPage * ITEMS_PER_PAGE);
 
+  if (!currentUser) {
+    return (
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: '100vh',
+        background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #064e3b 100%)',
+        fontFamily: "'Inter', sans-serif",
+        padding: '20px'
+      }}>
+        {toast && (
+          <div className={`toast ${toast.type}`}>
+            {toast.message}
+          </div>
+        )}
+        <div style={{
+          width: '400px',
+          maxWidth: '100%',
+          background: 'rgba(255, 255, 255, 0.96)',
+          backdropFilter: 'blur(16px)',
+          borderRadius: '16px',
+          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.4)',
+          padding: '36px 32px',
+          textAlign: 'center'
+        }}>
+          <img src={logopkp} alt="Logo PKP" style={{ height: '56px', marginBottom: '16px' }} />
+          <h2 style={{ margin: '0 0 6px 0', color: '#0f172a', fontWeight: '800', fontSize: '1.4rem', letterSpacing: '-0.5px' }}>
+            SiVeri BSPS
+          </h2>
+          <p style={{ margin: '0 0 28px 0', color: '#64748b', fontSize: '0.85rem' }}>
+            Sistem Database Verifikasi Perumahan Swadaya
+          </p>
+
+          <form onSubmit={handleLogin} style={{ textAlign: 'left' }}>
+            <div style={{ marginBottom: '18px' }}>
+              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: '#334155', marginBottom: '6px' }}>
+                Username
+              </label>
+              <input
+                type="text"
+                value={loginUsername}
+                onChange={e => setLoginUsername(e.target.value)}
+                placeholder="Masukkan username..."
+                required
+                autoFocus
+                style={{
+                  width: '100%',
+                  padding: '12px 14px',
+                  fontSize: '0.9rem',
+                  borderRadius: '8px',
+                  border: '1px solid #cbd5e1',
+                  outline: 'none',
+                  boxSizing: 'border-box'
+                }}
+              />
+            </div>
+
+            <div style={{ marginBottom: '24px' }}>
+              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '700', color: '#334155', marginBottom: '6px' }}>
+                Password
+              </label>
+              <input
+                type="password"
+                value={loginPassword}
+                onChange={e => setLoginPassword(e.target.value)}
+                placeholder="Masukkan password..."
+                required
+                style={{
+                  width: '100%',
+                  padding: '12px 14px',
+                  fontSize: '0.9rem',
+                  borderRadius: '8px',
+                  border: '1px solid #cbd5e1',
+                  outline: 'none',
+                  boxSizing: 'border-box'
+                }}
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={loginLoading}
+              style={{
+                width: '100%',
+                padding: '12px',
+                fontSize: '0.95rem',
+                fontWeight: '700',
+                color: '#ffffff',
+                backgroundColor: '#059669',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                boxShadow: '0 4px 6px -1px rgba(5, 150, 105, 0.3)'
+              }}
+            >
+              {loginLoading ? 'Memverifikasi...' : 'Masuk ke Aplikasi'}
+            </button>
+          </form>
+
+          <div style={{ marginTop: '24px', paddingTop: '18px', borderTop: '1px solid #e2e8f0', fontSize: '0.75rem', color: '#94a3b8' }}>
+            Disiapkan untuk Balai Pelaksana Penyediaan Perumahan &copy; 2026
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="app-container">
       {/* Notifikasi Toast */}
@@ -2606,13 +2762,15 @@ function App() {
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
               Rekap Unggahan
             </li>
-            <li 
-              className={`menu-item ${activeTab === 'upload' ? 'active' : ''}`}
-              onClick={() => setActiveTab('upload')}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
-              Unggah Data
-            </li>
+            {isAdmin && (
+              <li 
+                className={`menu-item ${activeTab === 'upload' ? 'active' : ''}`}
+                onClick={() => setActiveTab('upload')}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
+                Unggah Data
+              </li>
+            )}
             <li 
               className={`menu-item ${activeTab === 'settings' ? 'active' : ''}`}
               onClick={() => setActiveTab('settings')}
@@ -2628,7 +2786,24 @@ function App() {
           </ul>
         </nav>
 
-        <div style={{ marginTop: 'auto', padding: '8px 0' }}>
+        <div style={{ marginTop: 'auto', padding: '12px 0 8px 0', borderTop: '1px solid rgba(255, 255, 255, 0.15)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 10px', background: 'rgba(255, 255, 255, 0.1)', borderRadius: '8px', marginBottom: '10px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              <span style={{ color: '#ffffff', fontSize: '0.75rem', fontWeight: '700', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
+                👤 {currentUser?.username}
+              </span>
+              <span style={{ color: isAdmin ? '#a7f3d0' : '#fef08a', fontSize: '0.65rem', fontWeight: '700', textTransform: 'uppercase' }}>
+                {isAdmin ? 'ADMIN (Full Access)' : 'VIEWER (Read Only)'}
+              </span>
+            </div>
+            <button
+              onClick={handleLogout}
+              style={{ background: 'rgba(239, 68, 68, 0.25)', border: '1px solid rgba(239, 68, 68, 0.4)', color: '#fca5a5', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.7rem', fontWeight: '700' }}
+              title="Keluar dari akun"
+            >
+              Keluar
+            </button>
+          </div>
           <button
             onClick={() => setDarkMode(!darkMode)}
             style={{
@@ -3808,38 +3983,44 @@ function App() {
                     </div>
                   </div>
 
-                  <div className="recon-actions">
-                    <button 
-                      className="btn btn-secondary btn-sm" 
-                      onClick={() => handleStartManualEdit(r)}
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "4px", verticalAlign: "middle" }}><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>Koreksi Manual
-                    </button>
-                    <button 
-                      className="btn btn-secondary btn-sm" 
-                      onClick={() => {
-                        setLinkingRecord(r);
-                        setLinkSearchTerm(r.nama);
-                        setShowLinkModal(true);
-                      }}
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "4px", verticalAlign: "middle" }}><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>Pasangkan dengan INVERS
-                    </button>
-                    <button 
-                      className="btn btn-danger btn-sm" 
-                      onClick={() => handleDeleteVerifiedRecord(r.id, r.nama)}
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "4px", verticalAlign: "middle" }}><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>Hapus Data Lapangan
-                    </button>
-                    {r.expected_invers && (
+                  {isAdmin ? (
+                    <div className="recon-actions">
                       <button 
-                        className="btn btn-primary btn-sm"
-                        onClick={() => handleReconcileOverride(r, 'ACCEPT_VERIFIED')}
+                        className="btn btn-secondary btn-sm" 
+                        onClick={() => handleStartManualEdit(r)}
                       >
-                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "4px", verticalAlign: "middle" }}><polyline points="20 6 9 17 4 12"></polyline></svg>Setujui Data Lapangan
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "4px", verticalAlign: "middle" }}><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>Koreksi Manual
                       </button>
-                    )}
-                  </div>
+                      <button 
+                        className="btn btn-secondary btn-sm" 
+                        onClick={() => {
+                          setLinkingRecord(r);
+                          setLinkSearchTerm(r.nama);
+                          setShowLinkModal(true);
+                        }}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "4px", verticalAlign: "middle" }}><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>Pasangkan dengan INVERS
+                      </button>
+                      <button 
+                        className="btn btn-danger btn-sm" 
+                        onClick={() => handleDeleteVerifiedRecord(r.id, r.nama)}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "4px", verticalAlign: "middle" }}><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>Hapus Data Lapangan
+                      </button>
+                      {r.expected_invers && (
+                        <button 
+                          className="btn btn-primary btn-sm"
+                          onClick={() => handleReconcileOverride(r, 'ACCEPT_VERIFIED')}
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "4px", verticalAlign: "middle" }}><polyline points="20 6 9 17 4 12"></polyline></svg>Setujui Data Lapangan
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontStyle: 'italic', padding: '6px 12px', backgroundColor: 'rgba(0,0,0,0.03)', borderRadius: '6px' }}>
+                      🔒 Akses pengubahan data membutuhkan Akun Admin
+                    </div>
+                  )}
                 </div>
               ))}
               {getFilteredMismatches().length === 0 && (
@@ -4767,6 +4948,7 @@ function App() {
             onDeleteStage={handleDeleteStage}
             onClearDatabase={handleClearDatabase}
             showToast={showToast}
+            isAdmin={isAdmin}
           />
         )}
 

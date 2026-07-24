@@ -1,8 +1,37 @@
+import React, { useState } from 'react';
 import { IconAlertTriangle, IconTrash } from './Icons';
 
-const BACKEND_URL = 'http://127.0.0.1:8000';
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://127.0.0.1:8000';
 
-export default function SettingsPanel({ stages, selectedStageId, onDeleteStage, onClearDatabase, showToast }) {
+export default function SettingsPanel({ stages, selectedStageId, onDeleteStage, onClearDatabase, showToast, isAdmin }) {
+  const [changeTarget, setChangeTarget] = useState('balai_sul_3');
+  const [newPassword, setNewPassword] = useState('');
+  const [passLoading, setPassLoading] = useState(false);
+
+  const handlePasswordSubmit = async (e) => {
+    e.preventDefault();
+    if (!newPassword || newPassword.length < 4) {
+      showToast("Password minimal 4 karakter", "error");
+      return;
+    }
+    setPassLoading(true);
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/change-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: changeTarget, new_password: newPassword })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Gagal memperbarui password");
+      showToast(data.message || "Password berhasil diperbarui!");
+      setNewPassword('');
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      setPassLoading(false);
+    }
+  };
+
   const getSortedStages = () => {
     return [...stages].sort((a, b) => {
       const isPenggantiA = a.name.toLowerCase().includes('pengganti');
@@ -155,6 +184,50 @@ export default function SettingsPanel({ stages, selectedStageId, onDeleteStage, 
           Bersihkan Rekonsiliasi orphaned
         </button>
       </div>
+
+      {/* Pengaturan Password Akun (Admin Only) */}
+      {isAdmin && (
+        <div className="settings-card">
+          <h3>
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "6px", verticalAlign: "middle" }}>
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+            </svg>
+            Kelola Password Akun (Kredensial)
+          </h3>
+          <p>Ubah password untuk akun Admin (`yayatbalai`) atau Viewer (`balai_sul_3`) sesuai kebutuhan Anda.</p>
+
+          <form onSubmit={handlePasswordSubmit} style={{ maxWidth: '400px' }}>
+            <div style={{ marginBottom: '12px' }}>
+              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '600', marginBottom: '4px' }}>Pilih Akun:</label>
+              <select
+                value={changeTarget}
+                onChange={e => setChangeTarget(e.target.value)}
+                style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+              >
+                <option value="balai_sul_3">Viewer (balai_sul_3)</option>
+                <option value="yayatbalai">Admin (yayatbalai)</option>
+              </select>
+            </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: '600', marginBottom: '4px' }}>Password Baru:</label>
+              <input
+                type="password"
+                value={newPassword}
+                onChange={e => setNewPassword(e.target.value)}
+                placeholder="Masukkan password baru..."
+                required
+                style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+              />
+            </div>
+
+            <button type="submit" className="btn btn-primary btn-sm" disabled={passLoading}>
+              {passLoading ? 'Menyimpan...' : 'Perbarui Password'}
+            </button>
+          </form>
+        </div>
+      )}
 
       <div className="settings-card danger-zone">
         <h3><IconAlertTriangle />Area Bahaya (Danger Zone)</h3>
