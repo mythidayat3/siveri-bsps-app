@@ -12,14 +12,40 @@ def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # 1. INVERS Stages
+    # 0. Provinces Table
     cursor.execute("""
-    CREATE TABLE IF NOT EXISTS invers_stages (
+    CREATE TABLE IF NOT EXISTS provinces (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT UNIQUE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """)
+    
+    # Seed default provinces if empty
+    cursor.execute("SELECT COUNT(*) as cnt FROM provinces")
+    if cursor.fetchone()['cnt'] == 0:
+        cursor.execute("INSERT OR IGNORE INTO provinces (id, name) VALUES (1, 'SULAWESI SELATAN')")
+        cursor.execute("INSERT OR IGNORE INTO provinces (id, name) VALUES (2, 'SULAWESI TENGGARA')")
+    
+    # 1. INVERS Stages
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS invers_stages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT UNIQUE,
+        province_id INTEGER DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(province_id) REFERENCES provinces(id)
+    )
+    """)
+
+    # Migration: add province_id to invers_stages if missing and default existing stages to 1 (SULAWESI SELATAN)
+    try:
+        cursor.execute("SELECT province_id FROM invers_stages LIMIT 1")
+    except Exception:
+        cursor.execute("ALTER TABLE invers_stages ADD COLUMN province_id INTEGER DEFAULT 1")
+    
+    cursor.execute("UPDATE invers_stages SET province_id = 1 WHERE province_id IS NULL OR province_id = 0")
+    conn.commit()
     
     # 2. INVERS Revisions
     cursor.execute("""

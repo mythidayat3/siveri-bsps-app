@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx';
 import logopkp from './assets/LOGOPKP.svg';
 import SettingsPanel from './components/SettingsPanel';
 
-const BACKEND_URL = 'http://127.0.0.1:8000';
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://127.0.0.1:8000';
 
 // Beautiful SVG Flat Icons
 const IconDashboard = () => (
@@ -599,24 +599,87 @@ function App() {
     setTimeout(() => setToast(null), 4000);
   };
 
-  // Ambil data tahap awal
-  const fetchStages = useCallback(async () => {
+  // State Multi-Provinsi
+  const [provinces, setProvinces] = useState([]);
+  const [selectedProvinceId, setSelectedProvinceId] = useState(() => {
+    return parseInt(localStorage.getItem('selectedProvinceId')) || 1;
+  });
+  const [showAddProvinceModal, setShowAddProvinceModal] = useState(false);
+  const [newProvinceNameInput, setNewProvinceNameInput] = useState('');
+  const [addProvinceLoading, setAddProvinceLoading] = useState(false);
+
+  const fetchProvinces = useCallback(async () => {
     try {
-      const res = await fetch(`${BACKEND_URL}/api/stages`);
+      const res = await fetch(`${BACKEND_URL}/api/provinces`);
+      if (res.ok) {
+        const data = await res.json();
+        setProvinces(data);
+        if (data.length > 0 && !data.some(p => p.id === selectedProvinceId)) {
+          setSelectedProvinceId(data[0].id);
+        }
+      }
+    } catch (err) {
+      console.error("Gagal mengambil data provinsi:", err);
+    }
+  }, [selectedProvinceId]);
+
+  const handleAddProvince = async (e) => {
+    e.preventDefault();
+    const trimmed = newProvinceNameInput.trim().toUpperCase();
+    if (!trimmed) {
+      showToast("Nama provinsi tidak boleh kosong", "error");
+      return;
+    }
+    setAddProvinceLoading(true);
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/provinces`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: trimmed })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Gagal menambahkan provinsi");
+      showToast(data.message || "Provinsi berhasil ditambahkan!");
+      await fetchProvinces();
+      setSelectedProvinceId(data.id);
+      localStorage.setItem('selectedProvinceId', data.id);
+      setShowAddProvinceModal(false);
+      setNewProvinceNameInput('');
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      setAddProvinceLoading(false);
+    }
+  };
+
+  // Ambil data tahap berdasarkan provinsi aktif
+  const fetchStages = useCallback(async (targetProvId) => {
+    const pid = targetProvId || selectedProvinceId;
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/stages?province_id=${pid}`);
       if (!res.ok) throw new Error("Gagal mengambil data tahap");
       const data = await res.json();
       setStages(data);
-      if (data.length > 0 && !selectedStageId) {
-        setSelectedStageId(data[0].id.toString());
+      if (data.length > 0) {
+        setSelectedStageId(prev => {
+          if (prev && data.some(s => s.id.toString() === prev)) return prev;
+          return data[0].id.toString();
+        });
+      } else {
+        setSelectedStageId('');
       }
     } catch (err) {
       showToast(err.message, 'error');
     }
-  }, [selectedStageId]);
+  }, [selectedProvinceId]);
 
   useEffect(() => {
-    fetchStages();
-  }, [fetchStages]);
+    fetchProvinces();
+  }, [fetchProvinces]);
+
+  useEffect(() => {
+    fetchStages(selectedProvinceId);
+  }, [selectedProvinceId]);
 
   // Dark Mode toggle
   useEffect(() => {
@@ -798,6 +861,7 @@ function App() {
       if (globalFilterStatus !== 'ALL') params.set('status', globalFilterStatus);
       if (globalFilterTahap !== 'ALL') params.set('tahap', globalFilterTahap);
       if (globalFilterType !== 'all') params.set('record_type', globalFilterType);
+      params.set('published_only', activeTab === 'rekap-unggahan' ? '0' : '1');
       params.set('page', overridePage || globalPage);
       params.set('limit', '30');
       const res = await fetch(`${BACKEND_URL}/api/global-search?${params}`);
@@ -992,6 +1056,7 @@ function App() {
           return;
         }
         formData.append('stage_name', stageNameInput);
+        formData.append('province_id', selectedProvinceId);
         const res = await fetch(`${BACKEND_URL}/api/invers/upload`, {
           method: 'POST',
           body: formData
@@ -2046,9 +2111,11 @@ function App() {
   };
 
   // Set NIK yang sudah terverifikasi (untuk kolom Status di tabel INVERS)
-  const verifiedNikSet = new Set(
-    (recordsData?.verified_records || []).map(v => v.no_ktp?.trim())
-  );
+  const verifiedNikSet = new Set();
+  (recordsData?.verified_records || []).forEach(v => {
+    if (v.no_ktp) verifiedNikSet.add(v.no_ktp.trim());
+    if (v.expected_invers?.no_ktp) verifiedNikSet.add(v.expected_invers.no_ktp.trim());
+  });
 
   // Unique values untuk filter dropdown INVERS
   const uniqueInversKab = [...new Set((recordsData?.invers_records || []).map(r => r.kabupaten_kota).filter(Boolean))].sort();
@@ -2353,11 +2420,82 @@ function App() {
         </div>
       )}
 
+      {/* Modal Tambah Provinsi Baru */}
+      {showAddProvinceModal && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ width: '420px', maxWidth: '90%' }}>
+            <div className="modal-header">
+              <h3><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "8px", verticalAlign: "middle" }}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>Tambah Provinsi Baru</h3>
+              <button type="button" className="modal-close" onClick={() => setShowAddProvinceModal(false)}>&times;</button>
+            </div>
+            <form onSubmit={handleAddProvince}>
+              <div className="modal-body">
+                <div className="form-group">
+                  <label className="form-label">Nama Provinsi Baru</label>
+                  <input 
+                    type="text" 
+                    className="form-input" 
+                    placeholder="Contoh: SULAWESI TENGGARA" 
+                    value={newProvinceNameInput}
+                    onChange={e => setNewProvinceNameInput(e.target.value)}
+                    required
+                    autoFocus
+                  />
+                  <small style={{ color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
+                    Nama provinsi ini akan menjadi cakupan verifikasi baru dan ditampilkan pada seluruh kop laporan Excel/Word.
+                  </small>
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowAddProvinceModal(false)}>Batal</button>
+                <button type="submit" className="btn btn-primary btn-sm" disabled={addProvinceLoading}>
+                  {addProvinceLoading ? 'Saving...' : 'Simpan Provinsi'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Sidebar Navigasi */}
       <aside className="sidebar">
         <div className="logo-container">
           <img src={logopkp} alt="Logo PKP" className="logo-img" />
           <span className="logo-text">SIVERI BSPS</span>
+        </div>
+
+        <div className="form-group" style={{ marginBottom: '16px' }}>
+          <label className="form-label" style={{ color: '#a7f3d0', fontSize: '0.8rem', fontWeight: '600', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>Wilayah Provinsi</span>
+            <button 
+              type="button"
+              onClick={() => setShowAddProvinceModal(true)}
+              style={{ background: 'none', border: 'none', color: '#a7f3d0', cursor: 'pointer', fontSize: '0.75rem', fontWeight: '700', textDecoration: 'underline' }}
+              title="Tambah Provinsi Baru"
+            >
+              + Tambah
+            </button>
+          </label>
+          <select 
+            className="form-input" 
+            value={selectedProvinceId} 
+            onChange={(e) => {
+              const pid = parseInt(e.target.value);
+              setSelectedProvinceId(pid);
+              localStorage.setItem('selectedProvinceId', pid);
+              fetchStages(pid);
+            }}
+            style={{ padding: '8px 12px', fontSize: '0.85rem', background: 'rgba(255, 255, 255, 0.15)', color: '#ffffff', border: '1px solid rgba(255, 255, 255, 0.25)', fontWeight: '700' }}
+          >
+            {provinces.map(p => (
+              <option key={p.id} value={p.id} style={{ color: '#0f172a', backgroundColor: '#ffffff' }}>
+                {p.name}
+              </option>
+            ))}
+            {provinces.length === 0 && (
+              <option value="1" style={{ color: '#0f172a', backgroundColor: '#ffffff' }}>SULAWESI SELATAN</option>
+            )}
+          </select>
         </div>
 
         <div className="form-group" style={{ marginBottom: '24px' }}>

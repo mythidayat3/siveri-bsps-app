@@ -12,7 +12,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib import colors
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Body
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Body, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
@@ -50,25 +50,81 @@ def find_header_and_data(sheet):
         return headers, data_rows, header_row_idx
     return None, None, None
 
-@app.get("/api/stages")
-def get_stages():
+@app.get("/api/provinces")
+def get_provinces():
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT s.id, s.name, s.created_at, 
+        CREATE TABLE IF NOT EXISTS provinces (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("SELECT COUNT(*) as cnt FROM provinces")
+    if cursor.fetchone()['cnt'] == 0:
+        cursor.execute("INSERT OR IGNORE INTO provinces (id, name) VALUES (1, 'SULAWESI SELATAN')")
+        cursor.execute("INSERT OR IGNORE INTO provinces (id, name) VALUES (2, 'SULAWESI TENGGARA')")
+        conn.commit()
+        
+    cursor.execute("SELECT id, name FROM provinces ORDER BY id ASC")
+    provinces = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return provinces
+
+@app.post("/api/provinces")
+def create_province(body: dict = Body(...)):
+    name = body.get("name", "").strip().upper()
+    if not name:
+        raise HTTPException(status_code=400, detail="Nama provinsi tidak boleh kosong")
+        
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("INSERT INTO provinces (name) VALUES (?)", (name,))
+        conn.commit()
+        prov_id = cursor.lastrowid
+    except sqlite3.IntegrityError:
+        cursor.execute("SELECT id FROM provinces WHERE name = ?", (name,))
+        prov_id = cursor.fetchone()['id']
+    except Exception as e:
+        conn.close()
+        raise HTTPException(status_code=500, detail=f"Gagal menambahkan provinsi: {str(e)}")
+    conn.close()
+    return {"id": prov_id, "name": name, "message": f"Provinsi {name} berhasil ditambahkan"}
+
+@app.get("/api/stages")
+def get_stages(province_id: int = Query(None)):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Auto-update existing stages without province_id to 1 (SULAWESI SELATAN)
+    cursor.execute("UPDATE invers_stages SET province_id = 1 WHERE province_id IS NULL OR province_id = 0")
+    conn.commit()
+    
+    if not province_id or province_id == 1:
+        filter_sql = "WHERE (s.province_id = 1 OR s.province_id IS NULL OR s.province_id = 0)"
+        params = ()
+    else:
+        filter_sql = "WHERE s.province_id = ?"
+        params = (province_id,)
+        
+    cursor.execute(f"""
+        SELECT s.id, s.name, s.province_id, s.created_at, 
                (SELECT COUNT(*) FROM invers_records ir 
                 JOIN invers_revisions irv ON ir.revision_id = irv.id 
                 WHERE irv.stage_id = s.id AND irv.is_active = 1) as record_count,
                (SELECT MAX(revision_num) FROM invers_revisions WHERE stage_id = s.id) as max_revision
         FROM invers_stages s
+        {filter_sql}
         ORDER BY s.created_at DESC
-    """)
+    """, params)
     stages = [dict(row) for row in cursor.fetchall()]
     conn.close()
     return stages
 
 @app.post("/api/invers/upload")
-async def upload_invers(stage_name: str = Form(...), file: UploadFile = File(...)):
+async def upload_invers(stage_name: str = Form(...), province_id: int = Form(1), file: UploadFile = File(...)):
     if not stage_name.strip():
         raise HTTPException(status_code=400, detail="Nama tahap tidak boleh kosong")
     
@@ -106,9 +162,9 @@ async def upload_invers(stage_name: str = Form(...), file: UploadFile = File(...
             header_map['provinsi'] = idx
         elif 'DELINIASI' in h_upper:
             header_map['deliniasi'] = idx
-        elif 'KATALOG' in h_upper:
+        elif 'CATATAN' in h_upper or 'KATALOG' in h_upper:
             header_map['catatan_katalog'] = idx
-        elif 'PENGUSUL' in h_upper:
+        elif 'PENGGUSUL' in h_upper or 'PENGUSUL' in h_upper:
             header_map['pengusul'] = idx
         elif 'TAHAP' in h_upper:
             header_map['tahap'] = idx
@@ -123,12 +179,12 @@ async def upload_invers(stage_name: str = Form(...), file: UploadFile = File(...
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT id FROM invers_stages WHERE name = ?", (stage_name,))
+    cursor.execute("SELECT id FROM invers_stages WHERE name = ? AND province_id = ?", (stage_name, province_id))
     stage_row = cursor.fetchone()
     if stage_row:
         stage_id = stage_row['id']
     else:
-        cursor.execute("INSERT INTO invers_stages (name) VALUES (?)", (stage_name,))
+        cursor.execute("INSERT INTO invers_stages (name, province_id) VALUES (?, ?)", (stage_name, province_id))
         stage_id = cursor.lastrowid
         
     cursor.execute("SELECT MAX(revision_num) as max_rev FROM invers_revisions WHERE stage_id = ?", (stage_id,))
@@ -879,13 +935,13 @@ def get_stage_records(stage_id: int):
                 elif n_clean in invers_by_name and len(invers_by_name[n_clean]) == 1:
                     expected_invers = invers_by_name[n_clean][0]
                     
+            if expected_invers:
+                vr['expected_invers'] = expected_invers
+
             if override:
                 # Mismatch resolved via reconciliation override
                 is_mismatch = False
             else:
-                is_mismatch = True
-                mismatch_count += 1
-                
                 if expected_invers:
                     mismatch_fields = []
                     if expected_invers['nama'].strip().upper() != nama.upper():
@@ -897,9 +953,13 @@ def get_stage_records(stage_id: int):
                     if expected_invers['no_kk'].strip() != kk:
                         mismatch_fields.append("KK")
                         if not mismatch_type: mismatch_type = "KK_MISMATCH"
-                    errors.append(f"Ketidakcocokan dengan data INVERS pada kolom: {', '.join(mismatch_fields)}. Seharusnya Nama: '{expected_invers['nama']}', NIK: '{expected_invers['no_ktp']}', KK: '{expected_invers['no_kk']}'")
-                    vr['expected_invers'] = expected_invers
+                    if mismatch_fields:
+                        is_mismatch = True
+                        mismatch_count += 1
+                        errors.append(f"Ketidakcocokan dengan data INVERS pada kolom: {', '.join(mismatch_fields)}. Seharusnya Nama: '{expected_invers['nama']}', NIK: '{expected_invers['no_ktp']}', KK: '{expected_invers['no_kk']}'")
                 else:
+                    is_mismatch = True
+                    mismatch_count += 1
                     errors.append("Data tidak ditemukan dalam database INVERS")
                     mismatch_type = "MISSING_IN_INVERS"
                 
@@ -934,6 +994,39 @@ def save_reconciliation_override(
                 stage_id, original_no_ktp, override_type, corrected_nama, corrected_no_ktp, corrected_no_kk
             ) VALUES (?, ?, ?, ?, ?, ?)
         """, (stage_id, original_no_ktp, override_type, corrected_nama, corrected_no_ktp, corrected_no_kk))
+
+        # Sinkronisasi Data INVERS jika memilih 'ACCEPT_VERIFIED' atau 'MANUAL_EDIT'
+        if override_type in ('ACCEPT_VERIFIED', 'MANUAL_EDIT'):
+            cursor.execute("""
+                SELECT vr.id, vr.nama, vr.no_ktp, vr.no_kk, vr.desa_kelurahan
+                FROM verified_records vr
+                JOIN verified_batches vb ON vb.id = vr.batch_id
+                WHERE vb.stage_id = ? AND vr.no_ktp = ?
+            """, (stage_id, original_no_ktp))
+            v_rec = cursor.fetchone()
+            
+            if v_rec:
+                target_nik = corrected_no_ktp if (override_type == 'MANUAL_EDIT' and corrected_no_ktp) else v_rec['no_ktp']
+                target_nama = corrected_nama if (override_type == 'MANUAL_EDIT' and corrected_nama) else v_rec['nama']
+                target_kk = corrected_no_kk if (override_type == 'MANUAL_EDIT' and corrected_no_kk) else v_rec['no_kk']
+                
+                # Cari data rujukan di INVERS yang cocok berdasarkan Nama + Desa atau KK atau NIK lama
+                cursor.execute("""
+                    SELECT ir.id FROM invers_records ir
+                    JOIN invers_revisions irv ON ir.revision_id = irv.id
+                    WHERE irv.stage_id = ? AND irv.is_active = 1
+                      AND (ir.no_ktp = ? OR (UPPER(ir.nama) = UPPER(?) AND UPPER(ir.desa_kelurahan) = UPPER(?)) OR ir.no_kk = ?)
+                    LIMIT 1
+                """, (stage_id, original_no_ktp, target_nama, (v_rec['desa_kelurahan'] or '').strip(), target_kk))
+                inv_match = cursor.fetchone()
+                
+                if inv_match:
+                    cursor.execute("""
+                        UPDATE invers_records 
+                        SET no_ktp = ?, nama = ?, no_kk = ?
+                        WHERE id = ?
+                    """, (target_nik, target_nama, target_kk, inv_match['id']))
+
         conn.commit()
     except Exception as e:
         conn.close()
@@ -3399,6 +3492,7 @@ def global_search(
     status: str = "",
     tahap: str = "",
     record_type: str = "all",
+    published_only: int = 1,
     page: int = 1,
     limit: int = 30,
     export_all: bool = False
@@ -3432,19 +3526,12 @@ def global_search(
 
     # Status filter for verified records
     verified_status_clause = ""
-    verified_status_params = []
     if status == "LOLOS":
         verified_status_clause = "AND vr.status = 'LOLOS'"
     elif status == "TIDAK_LOLOS":
         verified_status_clause = "AND vr.status = 'TIDAK LOLOS'"
 
-    # Status filter for invers (unverified)
-    invers_status_clause = ""
-    if status == "BELUM":
-        invers_status_clause = "AND ir.no_ktp NOT IN (SELECT no_ktp FROM verified_records WHERE batch_id IN (SELECT id FROM verified_batches WHERE stage_id = ist.id))"
-    elif status:
-        # If status is set but not BELUM, no invers records match
-        invers_status_clause = "AND 1=0"
+    published_clause = "AND vb.is_published = 1" if published_only == 1 else ""
 
     all_records = []
     summary = {"total_alokasi": 0, "total_verifikasi": 0, "total_lolos": 0, "total_tidak_lolos": 0, "total_belum": 0}
@@ -3460,6 +3547,7 @@ def global_search(
             JOIN invers_stages ist ON ist.id = vb.stage_id
             WHERE {where_clause}
             {verified_status_clause}
+            {published_clause}
             ORDER BY vr.nama ASC
         """
         cursor.execute(query, params)
@@ -3490,6 +3578,7 @@ def global_search(
             invers_params.append(int(tahap))
 
         invers_where = " AND ".join(invers_conditions) if invers_conditions else "1=1"
+        published_invers_clause = "AND vb2.is_published = 1" if published_only == 1 else ""
 
         invers_query = f"""
             SELECT ir.id, ir.nama, ir.no_ktp, ir.no_kk, ir.kabupaten_kota, ir.kecamatan,
@@ -3503,7 +3592,7 @@ def global_search(
               AND ir.no_ktp NOT IN (
                   SELECT vr2.no_ktp FROM verified_records vr2
                   JOIN verified_batches vb2 ON vb2.id = vr2.batch_id
-                  WHERE vb2.stage_id = irv.stage_id
+                  WHERE vb2.stage_id = irv.stage_id {published_invers_clause}
               )
             ORDER BY ir.nama ASC
         """
@@ -5005,3 +5094,7 @@ def export_sk_dirjen_rekap_per_kabupaten(batch_id: int):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename={safe_stage}_REKAP_PB_PER_KABUPATEN.xlsx"}
     )
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("app:app", host="127.0.0.1", port=8000, reload=True)
