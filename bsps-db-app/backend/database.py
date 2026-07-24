@@ -85,6 +85,10 @@ def init_db():
         cursor.execute("SELECT tanggal_ba FROM verified_batches LIMIT 1")
     except Exception:
         cursor.execute("ALTER TABLE verified_batches ADD COLUMN tanggal_ba TEXT")
+    try:
+        cursor.execute("SELECT sort_order FROM verified_batches LIMIT 1")
+    except Exception:
+        cursor.execute("ALTER TABLE verified_batches ADD COLUMN sort_order INTEGER DEFAULT 0")
     
     # 5. Verified Records
     cursor.execute("""

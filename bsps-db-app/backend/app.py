@@ -234,7 +234,9 @@ async def upload_verified(
         conn.close()
         raise HTTPException(status_code=400, detail="Tahap INVERS yang dipilih tidak terdaftar")
         
-    cursor.execute("INSERT INTO verified_batches (stage_id, name) VALUES (?, ?)", (stage_id, batch_name))
+    cursor.execute("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM verified_batches WHERE stage_id = ?", (stage_id,))
+    next_sort_order = cursor.fetchone()[0]
+    cursor.execute("INSERT INTO verified_batches (stage_id, name, sort_order) VALUES (?, ?, ?)", (stage_id, batch_name, next_sort_order))
     batch_id = cursor.lastrowid
     
     h_lolos_map = {}
@@ -456,7 +458,7 @@ def get_stage_summary(stage_id: int):
     cursor.execute("SELECT id, revision_num, filename FROM invers_revisions WHERE stage_id = ? AND is_active = 1", (stage_id,))
     active_rev = cursor.fetchone()
     
-    cursor.execute("SELECT id, name, uploaded_at, is_published, nomor_ba, tanggal_ba FROM verified_batches WHERE stage_id = ? ORDER BY uploaded_at ASC", (stage_id,))
+    cursor.execute("SELECT id, name, uploaded_at, is_published, nomor_ba, tanggal_ba, sort_order FROM verified_batches WHERE stage_id = ? ORDER BY sort_order ASC, uploaded_at ASC, id ASC", (stage_id,))
     batches = [dict(row) for row in cursor.fetchall()]
     
     lolos_total = 0
@@ -697,6 +699,28 @@ def rename_batch(batch_id: int, body: dict = Body(...)):
         raise HTTPException(status_code=500, detail=f"Gagal mengubah nama batch: {str(e)}")
     conn.close()
     return {"batch_id": batch_id, "name": new_name, "message": "Nama Berita Acara / Batch berhasil diperbarui"}
+
+@app.post("/api/verified/batches/reorder")
+def reorder_verified_batches(body: dict = Body(...)):
+    orders = body.get("orders", [])
+    if not isinstance(orders, list):
+        raise HTTPException(status_code=400, detail="Format orders tidak valid")
+        
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        for idx, item in enumerate(orders):
+            b_id = item.get("id")
+            s_order = item.get("sort_order", idx + 1)
+            if b_id:
+                cursor.execute("UPDATE verified_batches SET sort_order = ? WHERE id = ?", (s_order, b_id))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        raise HTTPException(status_code=500, detail=f"Gagal mengurutkan batch: {str(e)}")
+    conn.close()
+    return {"status": "success", "message": "Urutan Berita Acara / Batch berhasil diperbarui"}
 
 @app.get("/api/stage/{stage_id}/records")
 def get_stage_records(stage_id: int):
@@ -2925,10 +2949,10 @@ def get_rekap_batch_ba(published_only: int = 1):
         stage_name = stage['name']
         
         cursor.execute(f"""
-            SELECT id, name, is_published, nomor_ba, tanggal_ba 
+            SELECT id, name, is_published, nomor_ba, tanggal_ba, sort_order 
             FROM verified_batches 
             WHERE stage_id = ? {stage_batch_filter}
-            ORDER BY uploaded_at ASC, id ASC
+            ORDER BY sort_order ASC, uploaded_at ASC, id ASC
         """, (stage_id,))
         batches = [dict(r) for r in cursor.fetchall()]
         
@@ -3045,7 +3069,7 @@ def export_rekap_batch_ba(published_only: int = 1):
             SELECT id, name, nomor_ba, tanggal_ba 
             FROM verified_batches 
             WHERE stage_id = ? {stage_batch_filter}
-            ORDER BY uploaded_at ASC, id ASC
+            ORDER BY sort_order ASC, uploaded_at ASC, id ASC
         """, (stage_id,))
         batches = [dict(r) for r in cursor.fetchall()]
         

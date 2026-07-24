@@ -210,6 +210,61 @@ function App() {
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('darkMode') === 'true');
   const [recordsData, setRecordsData] = useState(null);
   
+  // Drag and Drop Batch Reordering
+  const [draggedBatchIndex, setDraggedBatchIndex] = useState(null);
+  const [dragOverBatchIndex, setDragOverBatchIndex] = useState(null);
+
+  const handleBatchDragStart = (e, index) => {
+    setDraggedBatchIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', index);
+  };
+
+  const handleBatchDragOver = (e, index) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (dragOverBatchIndex !== index) {
+      setDragOverBatchIndex(index);
+    }
+  };
+
+  const handleBatchDrop = async (e, dropIndex) => {
+    e.preventDefault();
+    if (draggedBatchIndex === null || draggedBatchIndex === dropIndex) {
+      setDraggedBatchIndex(null);
+      setDragOverBatchIndex(null);
+      return;
+    }
+
+    const currentBatches = [...(stageSummary?.batches || [])];
+    const [draggedItem] = currentBatches.splice(draggedBatchIndex, 1);
+    currentBatches.splice(dropIndex, 0, draggedItem);
+
+    setStageSummary(prev => ({ ...prev, batches: currentBatches }));
+    setDraggedBatchIndex(null);
+    setDragOverBatchIndex(null);
+
+    const orders = currentBatches.map((b, idx) => ({ id: b.id, sort_order: idx + 1 }));
+
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/verified/batches/reorder`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orders })
+      });
+      if (res.ok) {
+        showToast('Urutan Berita Acara berhasil diperbarui', 'success');
+        if (typeof fetchRekapBatchBA === 'function') fetchRekapBatchBA();
+      } else {
+        showToast('Gagal menyimpan urutan batch', 'error');
+        if (selectedStageId) fetchStageSummary(selectedStageId);
+      }
+    } catch (err) {
+      showToast('Terjadi kesalahan saat menyimpan urutan batch', 'error');
+      if (selectedStageId) fetchStageSummary(selectedStageId);
+    }
+  };
+  
   // Dashboard & Rekap Center Data
   const [overviewStats, setOverviewStats] = useState(null);
   const [overviewTables, setOverviewTables] = useState(null);
@@ -2621,13 +2676,33 @@ function App() {
                       const matchSearch = b.name.toLowerCase().includes(baSearchTerm.toLowerCase());
                       const matchStatus = baFilterStatus === 'all' || (baFilterStatus === 'published' && b.is_published) || (baFilterStatus === 'unpublished' && !b.is_published);
                       return matchSearch && matchStatus;
-                    }).map(b => {
+                    }).map((b, idx) => {
                       const isExpanded = expandedBatchId === b.id;
                       const breakdown = batchBreakdownCache[b.id] || [];
+                      const isDragging = draggedBatchIndex === idx;
+                      const isDropTarget = dragOverBatchIndex === idx;
                       return (
                         <React.Fragment key={b.id}>
-                          <tr>
+                          <tr 
+                            draggable
+                            onDragStart={(e) => handleBatchDragStart(e, idx)}
+                            onDragOver={(e) => handleBatchDragOver(e, idx)}
+                            onDrop={(e) => handleBatchDrop(e, idx)}
+                            style={{ 
+                              cursor: 'grab',
+                              opacity: isDragging ? 0.4 : 1,
+                              borderTop: isDropTarget ? '2px solid var(--primary)' : undefined,
+                              transition: 'all 0.15s ease'
+                            }}
+                            className={isDropTarget ? 'batch-row-drop-target' : ''}
+                          >
                             <td style={{ fontWeight: '600', color: 'var(--primary)' }}>
+                              <span 
+                                title="Tarik dan lepas untuk mengubah urutan Berita Acara"
+                                style={{ cursor: 'grab', marginRight: '8px', color: 'var(--text-muted)', userSelect: 'none', fontSize: '1rem', verticalAlign: 'middle', display: 'inline-block' }}
+                              >
+                                ⠿
+                              </span>
                               <button
                                 onClick={() => toggleBatchBreakdown(b.id)}
                                 style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 6px', marginRight: '6px', fontSize: '0.8rem', color: 'var(--text-muted)', verticalAlign: 'middle' }}

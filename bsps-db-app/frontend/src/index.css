@@ -2943,46 +2943,53 @@ body {
   }
 }
 
-/* Rekap Batch BA Table 3-level headers & styling */
+/* Rekap Batch BA Table 3-level headers & styling - Custom Palette (#351598, #871131, #C4BEFA) */
 .rekap-batch-th-level1 {
   position: sticky;
   top: 0;
   z-index: 20;
-  background: linear-gradient(135deg, #1e3a8a, #1e3a5f);
+  background: #351598;
   color: #ffffff;
   font-weight: 700;
-  font-size: 0.85rem;
-  letter-spacing: 0.3px;
-  border-bottom: 1px solid rgba(255,255,255,0.15);
-  border-right: 2px solid #dee2e6;
+  font-size: 0.88rem;
+  letter-spacing: 0.8px;
+  border-bottom: 1px solid rgba(255,255,255,0.2);
+  border-right: 2px solid #230d67;
   vertical-align: middle;
   padding: 8px 10px;
   height: 48px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.12);
+}
+
+.dark .rekap-batch-th-level1 {
+  background: #230d67;
+  color: #ffffff;
+  border-bottom: 1px solid rgba(255,255,255,0.15);
+  border-right: 2px solid #1c0a54;
 }
 
 .rekap-batch-th-level2 {
   position: sticky;
   top: 48px;
   z-index: 20;
-  background: #ffedd5;
-  color: #c2410c;
+  background: #871131;
+  color: #ffffff;
   font-weight: 700;
   font-size: 0.78rem;
-  border-bottom: 1px solid #fed7aa;
-  border-right: 2px solid #fed7aa;
+  border-bottom: 1px solid #6b0c26;
+  border-right: 1px solid #6b0c26;
   text-align: center;
   padding: 6px 10px;
   height: 62px;
   vertical-align: middle;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.04);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.08);
 }
 
 .dark .rekap-batch-th-level2 {
-  background: #3c2f2f;
-  color: #ff9d76;
-  border-bottom: 1px solid #5a4242;
-  border-right: 2px solid #5a4242;
+  background: #5c0b21;
+  color: #ffffff;
+  border-bottom: 1px solid #4a081a;
+  border-right: 1px solid #4a081a;
 }
 
 .rekap-batch-th-level3 {
@@ -3013,23 +3020,23 @@ body {
   top: 0;
   left: 0;
   z-index: 40;
-  background: #e2e8f0;
-  color: #1e293b;
+  background: #C4BEFA;
+  color: #1e1045;
   font-weight: 700;
   font-size: 0.82rem;
   text-align: center;
   padding: 10px 12px;
-  border-bottom: 2px solid #94a3b8;
-  border-right: 2px solid #94a3b8;
+  border-bottom: 2px solid #a79ded;
+  border-right: 2px solid #a79ded;
   vertical-align: middle;
   box-shadow: 2px 2px 4px rgba(0,0,0,0.06);
 }
 
 .dark .rekap-batch-corner {
-  background: #1e293b;
-  color: #f8fafc;
-  border-bottom: 2px solid #475569;
-  border-right: 2px solid #475569;
+  background: #3b3378;
+  color: #f3f0ff;
+  border-bottom: 2px solid #2d2663;
+  border-right: 2px solid #2d2663;
 }
 
 .rekap-batch-sub-lolos {
@@ -3042,21 +3049,21 @@ body {
 }
 
 .rekap-batch-sub-tidak {
-  background: #fee2e2 !important;
-  color: #b91c1c !important;
+  background: #ffe4e6 !important;
+  color: #be123c !important;
 }
 .dark .rekap-batch-sub-tidak {
-  background: #7f1d1d !important;
-  color: #fca5a5 !important;
+  background: #4c0519 !important;
+  color: #fda4af !important;
 }
 
 .rekap-batch-sub-verif {
-  background: #f1f5f9 !important;
-  color: #334155 !important;
+  background: #e2e8f0 !important;
+  color: #1e293b !important;
 }
 .dark .rekap-batch-sub-verif {
   background: #334155 !important;
-  color: #cbd5e1 !important;
+  color: #f8fafc !important;
 }
 
 .rekap-batch-cell-verif {
@@ -3117,5 +3124,22 @@ body {
 
 .dark .rekap-batch-border-stage {
   border-right: 3px solid #6ee7b7 !important;
+}
+
+/* Drag and drop batch rows styling */
+.drag-handle-icon:hover {
+  color: var(--primary) !important;
+  transform: scale(1.2);
+  transition: transform 0.15s ease;
+}
+
+.batch-row-drop-target {
+  background-color: rgba(15, 118, 110, 0.08) !important;
+  box-shadow: inset 0 2px 0 var(--primary) !important;
+}
+
+.dark .batch-row-drop-target {
+  background-color: rgba(6, 78, 59, 0.3) !important;
+  box-shadow: inset 0 2px 0 #a7f3d0 !important;
 }
 
