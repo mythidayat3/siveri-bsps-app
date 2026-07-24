@@ -722,6 +722,53 @@ def reorder_verified_batches(body: dict = Body(...)):
     conn.close()
     return {"status": "success", "message": "Urutan Berita Acara / Batch berhasil diperbarui"}
 
+@app.post("/api/verified/record/{record_id}/update-status")
+def update_verified_record_status(record_id: int, body: dict = Body(...)):
+    new_status = body.get("status", "").upper().strip()
+    if new_status not in ["LOLOS", "TIDAK LOLOS"]:
+        raise HTTPException(status_code=400, detail="Status harus 'LOLOS' atau 'TIDAK LOLOS'")
+        
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT id, status, batch_id, no_ktp FROM verified_records WHERE id = ?", (record_id,))
+        rec = cursor.fetchone()
+        if not rec:
+            raise HTTPException(status_code=404, detail="Data terverifikasi tidak ditemukan")
+            
+        cursor.execute("UPDATE verified_records SET status = ? WHERE id = ?", (new_status, record_id))
+        conn.commit()
+    except HTTPException:
+        conn.close()
+        raise
+    except Exception as e:
+        conn.close()
+        raise HTTPException(status_code=500, detail=f"Gagal mengolah pembaruan status: {str(e)}")
+    conn.close()
+    return {"status": "success", "record_id": record_id, "new_status": new_status, "message": f"Status berhasil diubah menjadi {new_status}"}
+
+@app.post("/api/verified/records/bulk-update-status")
+def bulk_update_verified_records_status(body: dict = Body(...)):
+    record_ids = body.get("record_ids", [])
+    new_status = body.get("status", "").upper().strip()
+    if not record_ids or not isinstance(record_ids, list):
+        raise HTTPException(status_code=400, detail="Daftar CPB tidak boleh kosong")
+    if new_status not in ["LOLOS", "TIDAK LOLOS"]:
+        raise HTTPException(status_code=400, detail="Status harus 'LOLOS' atau 'TIDAK LOLOS'")
+        
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        placeholders = ",".join("?" for _ in record_ids)
+        cursor.execute(f"UPDATE verified_records SET status = ? WHERE id IN ({placeholders})", [new_status] + record_ids)
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        raise HTTPException(status_code=500, detail=f"Gagal mengolah pembaruan status massal: {str(e)}")
+    conn.close()
+    return {"status": "success", "updated_count": len(record_ids), "new_status": new_status, "message": f"{len(record_ids)} CPB berhasil diubah statusnya menjadi {new_status}"}
+
 @app.get("/api/stage/{stage_id}/records")
 def get_stage_records(stage_id: int):
     conn = get_db_connection()
