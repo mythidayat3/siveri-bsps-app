@@ -50,6 +50,11 @@ def find_header_and_data(sheet):
         return headers, data_rows, header_row_idx
     return None, None, None
 
+@app.get("/")
+@app.head("/")
+def root_health_check():
+    return {"status": "ok", "message": "SiVeri BSPS Backend API Online"}
+
 @app.post("/api/login")
 def login(body: dict = Body(...)):
     username = body.get("username", "").strip()
