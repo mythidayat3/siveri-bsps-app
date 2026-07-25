@@ -250,6 +250,7 @@ function App() {
     showToast("Anda telah keluar dari akun");
   };
 
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [stages, setStages] = useState([]);
   const [selectedStageId, setSelectedStageId] = useState('');
@@ -2613,11 +2614,42 @@ function App() {
         </div>
       )}
 
+      {/* Mobile Top Header Bar */}
+      <header className="mobile-header-bar">
+        <div className="mobile-logo-group">
+          <img src={logopkp} alt="Logo PKP" className="mobile-logo-img" />
+          <span className="mobile-logo-text">SIVERI BSPS</span>
+        </div>
+        <button 
+          className="mobile-hamburger-btn" 
+          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+          aria-label="Toggle Menu Navigasi"
+        >
+          {mobileMenuOpen ? (
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+          ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+          )}
+        </button>
+      </header>
+
+      {/* Mobile Backdrop Overlay */}
+      {mobileMenuOpen && (
+        <div className="mobile-sidebar-backdrop" onClick={() => setMobileMenuOpen(false)}></div>
+      )}
+
       {/* Sidebar Navigasi */}
-      <aside className="sidebar">
+      <aside className={`sidebar ${mobileMenuOpen ? 'mobile-open' : ''}`}>
         <div className="logo-container">
           <img src={logopkp} alt="Logo PKP" className="logo-img" />
           <span className="logo-text">SIVERI BSPS</span>
+          <button 
+            type="button" 
+            className="mobile-sidebar-close" 
+            onClick={() => setMobileMenuOpen(false)}
+          >
+            &times;
+          </button>
         </div>
 
         <div className="form-group" style={{ marginBottom: '16px' }}>
@@ -2674,19 +2706,19 @@ function App() {
           <ul className="menu-list">
             <li 
               className={`menu-item ${activeTab === 'dashboard' ? 'active' : ''}`}
-              onClick={() => setActiveTab('dashboard')}
+              onClick={() => { setActiveTab('dashboard'); setMobileMenuOpen(false); }}
             >
               <IconDashboard /> Dashboard
             </li>
             <li 
               className={`menu-item ${activeTab === 'invers' ? 'active' : ''}`}
-              onClick={() => setActiveTab('invers')}
+              onClick={() => { setActiveTab('invers'); setMobileMenuOpen(false); }}
             >
               <IconInvers /> Data INVERS
             </li>
             <li 
               className={`menu-item ${activeTab === 'verified' ? 'active' : ''}`}
-              onClick={() => setActiveTab('verified')}
+              onClick={() => { setActiveTab('verified'); setMobileMenuOpen(false); }}
             >
               <IconVerified /> Data Terverifikasi
             </li>
@@ -2697,6 +2729,7 @@ function App() {
                 <div onClick={() => {
                   setActiveTab('sk-dirjen');
                   if (!skDirjenActiveSubTab) setSkDirjenActiveSubTab('daftar-pb');
+                  setMobileMenuOpen(false);
                 }} style={{ flex: 1, display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
                   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "8px", verticalAlign: "middle" }}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
                   SK Dirjen
@@ -2711,23 +2744,23 @@ function App() {
               {skDirjenSubmenuOpen && (
                 <ul className="submenu">
                   <li className={`submenu-item ${skDirjenActiveSubTab === 'daftar-pb' ? 'active' : ''}`}
-                    onClick={() => { setSkDirjenActiveSubTab('daftar-pb'); setActiveTab('sk-dirjen'); fetchSkDirjenBatches(); }}>Daftar PB</li>
+                    onClick={() => { setSkDirjenActiveSubTab('daftar-pb'); setActiveTab('sk-dirjen'); fetchSkDirjenBatches(); setMobileMenuOpen(false); }}>Daftar PB</li>
                   <li className={`submenu-item ${skDirjenActiveSubTab === 'rekap-per-tahap' ? 'active' : ''}`}
-                    onClick={() => { setSkDirjenActiveSubTab('rekap-per-tahap'); setActiveTab('sk-dirjen'); fetchSkDirjenRekapPerTahap(); }}>Rekap PB Per Tahap</li>
+                    onClick={() => { setSkDirjenActiveSubTab('rekap-per-tahap'); setActiveTab('sk-dirjen'); fetchSkDirjenRekapPerTahap(); setMobileMenuOpen(false); }}>Rekap PB Per Tahap</li>
                   <li className={`submenu-item ${skDirjenActiveSubTab === 'rekap-per-kabupaten' ? 'active' : ''}`}
-                    onClick={() => { setSkDirjenActiveSubTab('rekap-per-kabupaten'); setActiveTab('sk-dirjen'); fetchSkDirjenBatches(); setSkDirjenSelectedKabForRekap('all'); fetchSkDirjenRekapPerKab('all'); }}>Rekap PB Per Kabupaten</li>
+                    onClick={() => { setSkDirjenActiveSubTab('rekap-per-kabupaten'); setActiveTab('sk-dirjen'); fetchSkDirjenBatches(); setSkDirjenSelectedKabForRekap('all'); fetchSkDirjenRekapPerKab('all'); setMobileMenuOpen(false); }}>Rekap PB Per Kabupaten</li>
                 </ul>
               )}
             </li>
             <li 
               className={`menu-item ${activeTab === 'overview' ? 'active' : ''}`}
-              onClick={() => setActiveTab('overview')}
+              onClick={() => { setActiveTab('overview'); setMobileMenuOpen(false); }}
             >
               <IconOverview /> Pusat Rekap Data
             </li>
             <li 
               className={`menu-item ${activeTab === 'reconciliation' ? 'active' : ''}`}
-              onClick={() => setActiveTab('reconciliation')}
+              onClick={() => { setActiveTab('reconciliation'); setMobileMenuOpen(false); }}
             >
               <IconReconcile /> Rekonsiliasi
               {getActiveMismatchCount() > 0 && (
@@ -2736,28 +2769,28 @@ function App() {
             </li>
             <li 
               className={`menu-item ${activeTab === 'rekap' ? 'active' : ''}`}
-              onClick={() => { setActiveTab('rekap'); fetchRekapKeseluruhan(); }}
+              onClick={() => { setActiveTab('rekap'); fetchRekapKeseluruhan(); setMobileMenuOpen(false); }}
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M16 6l2.29 2.29-4.88 4.88-4-4L2 16.59 3.41 18l6-6 4 4 6.3-6.29L22 12V6h-6z"/></svg>
               Rekap Keseluruhan
             </li>
             <li 
               className={`menu-item ${activeTab === 'rekap-batch-ba' ? 'active' : ''}`}
-              onClick={() => { setActiveTab('rekap-batch-ba'); fetchRekapBatchBA(); }}
+              onClick={() => { setActiveTab('rekap-batch-ba'); fetchRekapBatchBA(); setMobileMenuOpen(false); }}
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
               Rekap Batch BA
             </li>
             <li 
               className={`menu-item ${activeTab === 'global-search' ? 'active' : ''}`}
-              onClick={() => { setActiveTab('global-search'); fetchGlobalSearch(); }}
+              onClick={() => { setActiveTab('global-search'); fetchGlobalSearch(); setMobileMenuOpen(false); }}
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
               Pencarian Global
             </li>
             <li 
               className={`menu-item ${activeTab === 'rekap-unggahan' ? 'active' : ''}`}
-              onClick={() => { setActiveTab('rekap-unggahan'); fetchRekapUnggahan(); }}
+              onClick={() => { setActiveTab('rekap-unggahan'); fetchRekapUnggahan(); setMobileMenuOpen(false); }}
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
               Rekap Unggahan
@@ -2765,7 +2798,7 @@ function App() {
             {isAdmin && (
               <li 
                 className={`menu-item ${activeTab === 'upload' ? 'active' : ''}`}
-                onClick={() => setActiveTab('upload')}
+                onClick={() => { setActiveTab('upload'); setMobileMenuOpen(false); }}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
                 Unggah Data
@@ -2773,13 +2806,13 @@ function App() {
             )}
             <li 
               className={`menu-item ${activeTab === 'settings' ? 'active' : ''}`}
-              onClick={() => setActiveTab('settings')}
+              onClick={() => { setActiveTab('settings'); setMobileMenuOpen(false); }}
             >
               <IconSettings /> Pengaturan
             </li>
             <li 
               className={`menu-item ${activeTab === 'help' ? 'active' : ''}`}
-              onClick={() => setActiveTab('help')}
+              onClick={() => { setActiveTab('help'); setMobileMenuOpen(false); }}
             >
               <IconHelp /> Bantuan
             </li>
