@@ -114,19 +114,6 @@ def get_users():
 def get_provinces():
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS provinces (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    cursor.execute("SELECT COUNT(*) as cnt FROM provinces")
-    if cursor.fetchone()['cnt'] == 0:
-        cursor.execute("INSERT OR IGNORE INTO provinces (id, name) VALUES (1, 'SULAWESI SELATAN')")
-        cursor.execute("INSERT OR IGNORE INTO provinces (id, name) VALUES (2, 'SULAWESI TENGGARA')")
-        conn.commit()
-        
     cursor.execute("SELECT id, name FROM provinces ORDER BY id ASC")
     provinces = [dict(row) for row in cursor.fetchall()]
     conn.close()
@@ -157,10 +144,6 @@ def create_province(body: dict = Body(...)):
 def get_stages(province_id: int = Query(None)):
     conn = get_db_connection()
     cursor = conn.cursor()
-    
-    # Auto-update existing stages without province_id to 1 (SULAWESI SELATAN)
-    cursor.execute("UPDATE invers_stages SET province_id = 1 WHERE province_id IS NULL OR province_id = 0")
-    conn.commit()
     
     if not province_id or province_id == 1:
         filter_sql = "WHERE (s.province_id = 1 OR s.province_id IS NULL OR s.province_id = 0)"
