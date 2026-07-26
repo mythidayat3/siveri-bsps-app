@@ -2655,14 +2655,16 @@ function App() {
         <div className="form-group" style={{ marginBottom: '16px' }}>
           <label className="form-label" style={{ color: '#a7f3d0', fontSize: '0.8rem', fontWeight: '600', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span>Wilayah Provinsi</span>
-            <button 
-              type="button"
-              onClick={() => setShowAddProvinceModal(true)}
-              style={{ background: 'none', border: 'none', color: '#a7f3d0', cursor: 'pointer', fontSize: '0.75rem', fontWeight: '700', textDecoration: 'underline' }}
-              title="Tambah Provinsi Baru"
-            >
-              + Tambah
-            </button>
+            {isAdmin && (
+              <button 
+                type="button"
+                onClick={() => setShowAddProvinceModal(true)}
+                style={{ background: 'none', border: 'none', color: '#a7f3d0', cursor: 'pointer', fontSize: '0.75rem', fontWeight: '700', textDecoration: 'underline' }}
+                title="Tambah Provinsi Baru"
+              >
+                + Tambah
+              </button>
+            )}
           </label>
           <select 
             className="form-input" 
@@ -2869,7 +2871,7 @@ function App() {
           <div className="header-title">
             <h1 style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               {selectedStageName}
-              {selectedStageId && (
+              {selectedStageId && isAdmin && (
                 <button
                   className="btn btn-secondary btn-sm"
                   style={{ padding: '2px 8px', fontSize: '0.72rem', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px', verticalAlign: 'middle' }}
@@ -3099,12 +3101,14 @@ function App() {
                             className={isDropTarget ? 'batch-row-drop-target' : ''}
                           >
                             <td style={{ fontWeight: '600', color: 'var(--primary)' }}>
-                              <span 
-                                title="Tarik dan lepas untuk mengubah urutan Berita Acara"
-                                style={{ cursor: 'grab', marginRight: '8px', color: 'var(--text-muted)', userSelect: 'none', fontSize: '1rem', verticalAlign: 'middle', display: 'inline-block' }}
-                              >
-                                ⠿
-                              </span>
+                              {isAdmin && (
+                                <span 
+                                  title="Tarik dan lepas untuk mengubah urutan Berita Acara"
+                                  style={{ cursor: 'grab', marginRight: '8px', color: 'var(--text-muted)', userSelect: 'none', fontSize: '1rem', verticalAlign: 'middle', display: 'inline-block' }}
+                                >
+                                  ⠿
+                                </span>
+                              )}
                               <button
                                 onClick={() => toggleBatchBreakdown(b.id)}
                                 style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 6px', marginRight: '6px', fontSize: '0.8rem', color: 'var(--text-muted)', verticalAlign: 'middle' }}
@@ -3120,15 +3124,26 @@ function App() {
                             <td>{b.replacement_count} CPB</td>
                             <td style={{ fontWeight: '600' }}>{b.lolos_count + b.tidak_lolos_count} CPB</td>
                             <td style={{ textAlign: 'center' }}>
-                              <label className="publish-checkbox" title={b.is_published ? "Sudah terbit — klik untuk batalkan" : "Belum terbit — klik untuk tandai terbit"}>
-                                <input
-                                  type="checkbox"
-                                  checked={!!b.is_published}
-                                  onChange={() => handleTogglePublished(b.id)}
-                                />
-                                <span className="publish-checkmark"></span>
-                                <span className="publish-label">{b.is_published ? 'Ya' : 'Tidak'}</span>
-                              </label>
+                              {isAdmin ? (
+                                <label className="publish-checkbox" title={b.is_published ? "Sudah terbit — klik untuk batalkan" : "Belum terbit — klik untuk tandai terbit"}>
+                                  <input
+                                    type="checkbox"
+                                    checked={!!b.is_published}
+                                    onChange={() => handleTogglePublished(b.id)}
+                                  />
+                                  <span className="publish-checkmark"></span>
+                                  <span className="publish-label">{b.is_published ? 'Ya' : 'Tidak'}</span>
+                                </label>
+                              ) : (
+                                <span style={{ 
+                                  padding: '2px 8px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: '700',
+                                  backgroundColor: b.is_published ? 'var(--success-light)' : 'rgba(0,0,0,0.05)',
+                                  color: b.is_published ? 'var(--success)' : 'var(--text-muted)',
+                                  border: `1px solid ${b.is_published ? 'var(--success)' : 'var(--border)'}`
+                                }}>
+                                  {b.is_published ? 'Ya' : 'Tidak'}
+                                </span>
+                              )}
                             </td>
                             <td>
                               <div style={{ display: 'flex', gap: '8px' }}>
@@ -3154,19 +3169,23 @@ function App() {
                                 >
                                   <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "4px", verticalAlign: "middle" }}><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>Preview
                                 </button>
-                                <button 
-                                  className="btn btn-secondary btn-sm" 
-                                  onClick={() => openRenameBatchModal(b.id, b.name)}
-                                  title="Ubah Nama Berita Acara / Batch"
-                                >
-                                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "4px", verticalAlign: "middle" }}><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>Ubah Nama
-                                </button>
-                                <button 
-                                  className="btn btn-danger btn-sm"
-                                  onClick={() => handleDeleteBatch(b.id)}
-                                >
-                                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "4px", verticalAlign: "middle" }}><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>Hapus Batch
-                                </button>
+                                {isAdmin && (
+                                  <>
+                                    <button 
+                                      className="btn btn-secondary btn-sm" 
+                                      onClick={() => openRenameBatchModal(b.id, b.name)}
+                                      title="Ubah Nama Berita Acara / Batch"
+                                    >
+                                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "4px", verticalAlign: "middle" }}><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>Ubah Nama
+                                    </button>
+                                    <button 
+                                      className="btn btn-danger btn-sm"
+                                      onClick={() => handleDeleteBatch(b.id)}
+                                    >
+                                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "4px", verticalAlign: "middle" }}><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>Hapus Batch
+                                    </button>
+                                  </>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -3371,7 +3390,7 @@ function App() {
             <div className="card-header-title">
               <span>File ke-2: Data Hasil Verifikasi Lapangan</span>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                {selectedRecordIds.size > 0 && (
+                {isAdmin && selectedRecordIds.size > 0 && (
                   <>
                     <button 
                       className="btn btn-sm"
@@ -3459,14 +3478,16 @@ function App() {
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th style={{ width: '40px', textAlign: 'center' }}>
-                      <input 
-                        type="checkbox" 
-                        checked={selectedRecordIds.size === getFilteredVerified().length && getFilteredVerified().length > 0}
-                        onChange={toggleAllRecordSelection}
-                        style={{ cursor: 'pointer' }}
-                      />
-                    </th>
+                    {isAdmin && (
+                      <th style={{ width: '40px', textAlign: 'center' }}>
+                        <input 
+                          type="checkbox" 
+                          checked={selectedRecordIds.size === getFilteredVerified().length && getFilteredVerified().length > 0}
+                          onChange={toggleAllRecordSelection}
+                          style={{ cursor: 'pointer' }}
+                        />
+                      </th>
+                    )}
                     <th>Status</th>
                     <th>Nama</th>
                     <th>NIK / No. KTP</th>
@@ -3481,34 +3502,50 @@ function App() {
                 <tbody>
                   {paginatedVerified.map(r => (
                     <tr key={r.id} className={r.has_error ? "row-error" : ""}>
-                      <td style={{ textAlign: 'center' }}>
-                        <input 
-                          type="checkbox" 
-                          checked={selectedRecordIds.has(r.id)}
-                          onChange={() => toggleRecordSelection(r.id)}
-                          style={{ cursor: 'pointer' }}
-                        />
-                      </td>
+                      {isAdmin && (
+                        <td style={{ textAlign: 'center' }}>
+                          <input 
+                            type="checkbox" 
+                            checked={selectedRecordIds.has(r.id)}
+                            onChange={() => toggleRecordSelection(r.id)}
+                            style={{ cursor: 'pointer' }}
+                          />
+                        </td>
+                      )}
                       <td>
-                        <select
-                          value={r.status}
-                          onChange={(e) => handleUpdateRecordStatus(r.id, e.target.value)}
-                          style={{
+                        {isAdmin ? (
+                          <select
+                            value={r.status}
+                            onChange={(e) => handleUpdateRecordStatus(r.id, e.target.value)}
+                            style={{
+                              padding: '3px 8px',
+                              borderRadius: '4px',
+                              fontWeight: '700',
+                              fontSize: '0.75rem',
+                              backgroundColor: r.status === 'LOLOS' ? 'var(--success-light)' : 'var(--danger-light)',
+                              color: r.status === 'LOLOS' ? 'var(--success)' : 'var(--danger)',
+                              border: `1px solid ${r.status === 'LOLOS' ? 'var(--success)' : 'var(--danger)'}`,
+                              cursor: 'pointer',
+                              outline: 'none'
+                            }}
+                            title="Klik untuk mengubah status CPB ini (LOLOS <-> TIDAK LOLOS)"
+                          >
+                            <option value="LOLOS" style={{ backgroundColor: '#ffffff', color: '#16a34a', fontWeight: '700' }}>LOLOS</option>
+                            <option value="TIDAK LOLOS" style={{ backgroundColor: '#ffffff', color: '#dc2626', fontWeight: '700' }}>TIDAK LOLOS</option>
+                          </select>
+                        ) : (
+                          <span style={{
                             padding: '3px 8px',
                             borderRadius: '4px',
                             fontWeight: '700',
                             fontSize: '0.75rem',
                             backgroundColor: r.status === 'LOLOS' ? 'var(--success-light)' : 'var(--danger-light)',
                             color: r.status === 'LOLOS' ? 'var(--success)' : 'var(--danger)',
-                            border: `1px solid ${r.status === 'LOLOS' ? 'var(--success)' : 'var(--danger)'}`,
-                            cursor: 'pointer',
-                            outline: 'none'
-                          }}
-                          title="Klik untuk mengubah status CPB ini (LOLOS <-> TIDAK LOLOS)"
-                        >
-                          <option value="LOLOS" style={{ backgroundColor: '#ffffff', color: '#16a34a', fontWeight: '700' }}>LOLOS</option>
-                          <option value="TIDAK LOLOS" style={{ backgroundColor: '#ffffff', color: '#dc2626', fontWeight: '700' }}>TIDAK LOLOS</option>
-                        </select>
+                            border: `1px solid ${r.status === 'LOLOS' ? 'var(--success)' : 'var(--danger)'}`
+                          }}>
+                            {r.status}
+                          </span>
+                        )}
                       </td>
                       <td style={{ fontWeight: '600' }}>{r.nama}</td>
                       <td className="mono-digit">{r.no_ktp}</td>
@@ -3820,13 +3857,15 @@ function App() {
             {/* Filter Jenis Kesalahan & Pencarian */}
             <div className="filter-bar">
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <input 
-                  type="checkbox" 
-                  checked={selectedMismatchNiks.size === getFilteredMismatches().length && getFilteredMismatches().length > 0}
-                  onChange={toggleAllMismatchSelection}
-                  style={{ cursor: 'pointer' }}
-                  title="Pilih semua"
-                />
+                {isAdmin && (
+                  <input 
+                    type="checkbox" 
+                    checked={selectedMismatchNiks.size === getFilteredMismatches().length && getFilteredMismatches().length > 0}
+                    onChange={toggleAllMismatchSelection}
+                    style={{ cursor: 'pointer' }}
+                    title="Pilih semua"
+                  />
+                )}
                 <span style={{ fontSize: '0.9rem', fontWeight: 600 }}>Filter Kategori Error:</span>
                 <select 
                   className="filter-select"
@@ -3845,7 +3884,7 @@ function App() {
                 </select>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                {selectedMismatchNiks.size > 0 && (
+                {isAdmin && selectedMismatchNiks.size > 0 && (
                   <>
                     <button 
                       className="btn btn-primary btn-sm"
@@ -3874,7 +3913,7 @@ function App() {
                 )}
                 <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--danger)' }}>
                   Ditemukan {getFilteredMismatches().length} kasus kesalahan
-                  {selectedMismatchNiks.size > 0 && ` (${selectedMismatchNiks.size} dipilih)`}
+                  {isAdmin && selectedMismatchNiks.size > 0 && ` (${selectedMismatchNiks.size} dipilih)`}
                 </span>
               </div>
             </div>
@@ -3919,7 +3958,7 @@ function App() {
                 <div className="recon-card" key={r.id} style={{ borderLeft: r.override ? '4px solid var(--success)' : '4px solid var(--danger)' }}>
                   <div className="recon-card-header">
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      {!r.override && (
+                      {isAdmin && !r.override && (
                         <input 
                           type="checkbox" 
                           checked={selectedMismatchNiks.has(r.no_ktp)}
@@ -4082,16 +4121,18 @@ function App() {
                       <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                         — Data INVERS yang belum memiliki pasangan di Berita Acara.
                       </span>
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <button className="btn btn-secondary btn-sm" onClick={() => { fetchSuggestedPairs(selectedStageId); fetchInlineSuggestions(unmatchedInvers.slice(0, 20)); }} style={{ whiteSpace: 'nowrap', fontSize: '0.8rem' }}>
-                          🔍 Cari Saran
-                        </button>
-                        <button className="btn btn-primary btn-sm" onClick={handleAutoPairNIK} disabled={autoPairing} style={{ whiteSpace: 'nowrap', fontSize: '0.8rem' }}>
-                          {autoPairing ? '⏳ Memproses...' : '⚡ Auto-Pair NIK/KK Cocok'}
-                        </button>
-                      </div>
+                      {isAdmin && (
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button className="btn btn-secondary btn-sm" onClick={() => { fetchSuggestedPairs(selectedStageId); fetchInlineSuggestions(unmatchedInvers.slice(0, 20)); }} style={{ whiteSpace: 'nowrap', fontSize: '0.8rem' }}>
+                            🔍 Cari Saran
+                          </button>
+                          <button className="btn btn-primary btn-sm" onClick={handleAutoPairNIK} disabled={autoPairing} style={{ whiteSpace: 'nowrap', fontSize: '0.8rem' }}>
+                            {autoPairing ? '⏳ Memproses...' : '⚡ Auto-Pair NIK/KK Cocok'}
+                          </button>
+                        </div>
+                      )}
                     </div>
-                    {suggestedPairs.length > 0 && (
+                    {isAdmin && suggestedPairs.length > 0 && (
                       <div style={{ backgroundColor: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: '8px', padding: '16px', marginBottom: '16px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
                           <span style={{ fontSize: '0.95rem', fontWeight: 700, color: '#0369a1' }}>📋 Kandidat Cocok Nama + Desa ({suggestedPairs.length} data)</span>
@@ -4479,7 +4520,7 @@ function App() {
                       <option key={b.id} value={b.id}>{b.stage_name} ({b.total_records} data)</option>
                     ))}
                     </select>
-                    {skDirjenSelectedBatch && skDirjenSelectedBatch !== 'all' && (
+                    {skDirjenSelectedBatch && skDirjenSelectedBatch !== 'all' && isAdmin && (
                       <button 
                         className="btn btn-danger" 
                         style={{ marginLeft: 8, padding: '4px 12px', fontSize: '0.75rem' }}
