@@ -324,8 +324,7 @@ function App() {
       if (res.ok) {
         showToast(data.message || `Status CPB berhasil diubah menjadi ${newStatus}`, 'success');
         if (selectedStageId) {
-          fetchStageRecords(selectedStageId);
-          fetchStageSummary(selectedStageId);
+          fetchStageData(selectedStageId);
         }
         if (typeof fetchRekapBatchBA === 'function') fetchRekapBatchBA();
         if (typeof fetchOverviewCenter === 'function') fetchOverviewCenter();
@@ -333,7 +332,7 @@ function App() {
         showToast(data.detail || 'Gagal mengubah status CPB', 'error');
       }
     } catch (err) {
-      showToast('Terjadi kesalahan saat mengubah status CPB', 'error');
+      showToast(err.message || 'Terjadi kesalahan saat mengubah status CPB', 'error');
     }
   };
 
@@ -356,8 +355,7 @@ function App() {
         showToast(data.message || `Status ${recordIds.length} CPB berhasil diubah menjadi ${newStatus}`, 'success');
         setSelectedRecordIds(new Set());
         if (selectedStageId) {
-          fetchStageRecords(selectedStageId);
-          fetchStageSummary(selectedStageId);
+          fetchStageData(selectedStageId);
         }
         if (typeof fetchRekapBatchBA === 'function') fetchRekapBatchBA();
         if (typeof fetchOverviewCenter === 'function') fetchOverviewCenter();
@@ -365,7 +363,7 @@ function App() {
         showToast(data.detail || 'Gagal mengolah pembaruan status massal', 'error');
       }
     } catch (err) {
-      showToast('Terjadi kesalahan saat pembaruan status massal', 'error');
+      showToast(err.message || 'Terjadi kesalahan saat pembaruan status massal', 'error');
     }
   };
   
