@@ -15,8 +15,7 @@ from openpyxl.utils import get_column_letter
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Body, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
-from pydantic import BaseModel
-from database import get_db_connection, DB_PATH, init_db
+from database import get_db_connection, DB_PATH, init_db, lookup_village_code, normalize_geo_name
 init_db()
 
 BASE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
@@ -465,6 +464,9 @@ async def upload_verified(
         tanggal = str(row[h_lolos_map.get('tanggal')]).strip() if 'tanggal' in h_lolos_map and h_lolos_map['tanggal'] < len(row) and row[h_lolos_map['tanggal']] is not None else None
         keterangan = str(row[h_lolos_map.get('keterangan')]).strip() if 'keterangan' in h_lolos_map and h_lolos_map['keterangan'] < len(row) and row[h_lolos_map['keterangan']] is not None else None
 
+        if not kode_desa or str(kode_desa).upper() in ("NONE", "NULL", "NAN", ""):
+            kode_desa = lookup_village_code(conn, kabupaten_kota, kecamatan, desa_kelurahan)
+
         cursor.execute("""
             INSERT INTO verified_records (
                 batch_id, no_urut, kode_desa, nama, jenis_kelamin, no_ktp, no_kk,
@@ -495,6 +497,7 @@ async def upload_verified(
             stats["tidak_lolos_added"] += 1
             
         no_urut = row[h_tidak_map.get('no_urut')] if 'no_urut' in h_tidak_map and h_tidak_map['no_urut'] < len(row) else None
+        kode_desa = str(row[h_tidak_map.get('kode_desa')]).strip() if 'kode_desa' in h_tidak_map and h_tidak_map['kode_desa'] < len(row) and row[h_tidak_map['kode_desa']] is not None else None
         jenis_kelamin = str(row[h_tidak_map.get('jenis_kelamin')]).strip() if 'jenis_kelamin' in h_tidak_map and h_tidak_map['jenis_kelamin'] < len(row) and row[h_tidak_map['jenis_kelamin']] is not None else None
         alamat = str(row[h_tidak_map.get('alamat')]).strip() if 'alamat' in h_tidak_map and h_tidak_map['alamat'] < len(row) and row[h_tidak_map['alamat']] is not None else None
         desa_kelurahan = str(row[h_tidak_map.get('desa_kelurahan')]).strip() if 'desa_kelurahan' in h_tidak_map and h_tidak_map['desa_kelurahan'] < len(row) and row[h_tidak_map['desa_kelurahan']] is not None else None
@@ -505,13 +508,16 @@ async def upload_verified(
         tanggal = str(row[h_tidak_map.get('tanggal')]).strip() if 'tanggal' in h_tidak_map and h_tidak_map['tanggal'] < len(row) and row[h_tidak_map['tanggal']] is not None else None
         keterangan = str(row[h_tidak_map.get('keterangan')]).strip() if 'keterangan' in h_tidak_map and h_tidak_map['keterangan'] < len(row) and row[h_tidak_map['keterangan']] is not None else None
 
+        if not kode_desa or str(kode_desa).upper() in ("NONE", "NULL", "NAN", ""):
+            kode_desa = lookup_village_code(conn, kabupaten_kota, kecamatan, desa_kelurahan)
+
         cursor.execute("""
             INSERT INTO verified_records (
                 batch_id, no_urut, kode_desa, nama, jenis_kelamin, no_ktp, no_kk,
                 alamat, desa_kelurahan, kecamatan, kabupaten_kota, status,
                 tahap, tanggal, alasan_tidak_lolos, keterangan, is_duplicate_in_previous
-            ) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 'TIDAK LOLOS', ?, ?, ?, ?, ?)
-        """, (batch_id, no_urut, nama, jenis_kelamin, no_ktp, no_kk,
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'TIDAK LOLOS', ?, ?, ?, ?, ?)
+        """, (batch_id, no_urut, kode_desa, nama, jenis_kelamin, no_ktp, no_kk,
               alamat, desa_kelurahan, kecamatan, kabupaten_kota, tahap, tanggal, alasan, keterangan, is_dup))
         record_id = cursor.lastrowid
         
@@ -1427,9 +1433,104 @@ def rename_stage(stage_id: int, body: dict = Body(...)):
     conn.close()
     return {"stage_id": stage_id, "name": new_name, "message": "Nama Tahap INVERS berhasil diperbarui"}
 
+@app.post("/api/upload/village-codes")
+async def upload_village_codes(file: UploadFile = File(...)):
+    if not file.filename.endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="Hanya file Excel (.xlsx) yang diperbolehkan")
+        
+    contents = await file.read()
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(contents), data_only=True)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Gagal membaca file Excel: {str(e)}")
+        
+    sheet = wb.active
+    rows = list(sheet.iter_rows(values_only=True))
+    if not rows:
+        raise HTTPException(status_code=400, detail="File Excel kosong")
+        
+    header_idx = None
+    col_map = {}
+    for r_idx, row in enumerate(rows[:20]):
+        row_str = [str(c).strip().upper() if c is not None else '' for c in row]
+        if any("KODE" in c and "DESA" in c for c in row_str) or any("KAB" in c or "KOTA" in c for c in row_str):
+            header_idx = r_idx
+            for c_idx, val in enumerate(row_str):
+                if "KODE" in val and "DESA" in val:
+                    col_map["kode_desa"] = c_idx
+                elif "PROV" in val:
+                    col_map["provinsi"] = c_idx
+                elif "KAB" in val or "KOTA" in val:
+                    col_map["kabupaten"] = c_idx
+                elif "KEC" in val or "DISTRIK" in val:
+                    col_map["kecamatan"] = c_idx
+                elif "DESA" in val or "KELURAHAN" in val:
+                    col_map["desa"] = c_idx
+                elif "DELINEASI" in val or "DELINIASI" in val:
+                    col_map["delineasi"] = c_idx
+            break
+
+    if "kode_desa" not in col_map: col_map["kode_desa"] = 1
+    if "provinsi" not in col_map: col_map["provinsi"] = 2
+    if "kabupaten" not in col_map: col_map["kabupaten"] = 3
+    if "kecamatan" not in col_map: col_map["kecamatan"] = 4
+    if "desa" not in col_map: col_map["desa"] = 5
+    if "delineasi" not in col_map: col_map["delineasi"] = 6
+
+    start_row = (header_idx + 1) if header_idx is not None else 1
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    records_to_insert = []
+    for row in rows[start_row:]:
+        if not row or all(c is None for c in row):
+            continue
+        
+        def get_val(idx):
+            if idx < len(row) and row[idx] is not None:
+                return str(row[idx]).strip()
+            return ""
+
+        kode_desa = get_val(col_map.get("kode_desa", 1))
+        provinsi = get_val(col_map.get("provinsi", 2))
+        kabupaten = get_val(col_map.get("kabupaten", 3))
+        kecamatan = get_val(col_map.get("kecamatan", 4))
+        desa = get_val(col_map.get("desa", 5))
+        delineasi = get_val(col_map.get("delineasi", 6))
+
+        if not kode_desa and not desa:
+            continue
+
+        c_kab = normalize_geo_name(kabupaten)
+        c_kec = normalize_geo_name(kecamatan)
+        c_desa = normalize_geo_name(desa)
+
+        records_to_insert.append((kode_desa, provinsi, kabupaten, kecamatan, desa, delineasi, c_kab, c_kec, c_desa))
+
+    count = 0
+    if records_to_insert:
+        cursor.executemany("""
+        INSERT OR REPLACE INTO village_codes 
+        (kode_desa, provinsi, kabupaten_kota, kecamatan, desa_kelurahan, delineasi, clean_kab, clean_kec, clean_desa)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, records_to_insert)
+        conn.commit()
+        count = len(records_to_insert)
+
+    conn.close()
+    return {
+        "status": "success",
+        "message": f"Berhasil mengunggah & memperbarui {count:,} database Kode Desa/Kelurahan!",
+        "count": count
+    }
+
 @app.get("/api/templates/download/{template_type}")
 def download_template(template_type: str):
-    if template_type == "invers":
+    if template_type == "village_codes":
+        filepath = os.path.join(BASE_DIR, "DATABASE_KODE_DESA.xlsx")
+        filename = "TEMPLATE_DATABASE_KODE_DESA.xlsx"
+    elif template_type == "invers":
         filepath = os.path.join(BASE_DIR, "INVERS.xlsx")
         filename = "TEMPLATE_INVERS.xlsx"
     elif template_type == "verified":
@@ -1441,10 +1542,69 @@ def download_template(template_type: str):
     else:
         raise HTTPException(status_code=400, detail="Tipe template tidak dikenal")
         
-    if not os.path.exists(filepath):
-        raise HTTPException(status_code=404, detail="File template tidak ditemukan di direktori lokal")
+    if os.path.exists(filepath):
+        return FileResponse(filepath, filename=filename)
         
-    return FileResponse(filepath, filename=filename)
+    # Dynamic Openpyxl fallback if file does not exist locally
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    header_fill = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
+    header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+    thin_border = Border(
+        left=Side(style='thin', color='D3D3D3'), right=Side(style='thin', color='D3D3D3'),
+        top=Side(style='thin', color='D3D3D3'), bottom=Side(style='thin', color='D3D3D3')
+    )
+
+    if template_type == "village_codes":
+        ws.title = "Database Kode Desa"
+        headers = ["NO", "KODE DESA", "PROVINSI", "KAB./KOTA", "KECAMATAN/DISTRIK", "DESA/KELURAHAN", "DELINEASI"]
+        sample_rows = [
+            [1, "1101012001", "ACEH", "KAB. ACEH SELATAN", "BAKONGAN", "KEUDE BAKONGAN", "PESISIR"],
+            [2, "1101012002", "ACEH", "KAB. ACEH SELATAN", "BAKONGAN", "UJONG MANGKI", "PESISIR"]
+        ]
+    elif template_type == "invers":
+        ws.title = "INVERS"
+        headers = ["NO", "NAMA", "NIK", "NO KK", "ALAMAT", "DESA/KELURAHAN", "KECAMATAN", "KABUPATEN/KOTA"]
+        sample_rows = [[1, "JOHN DOE", "7301010101010001", "7301010101010002", "JL. SUDIRMAN NO. 1", "DESA A", "KECAMATAN B", "KABUPATEN C"]]
+    elif template_type == "sk_dirjen":
+        ws.title = "SK DIRJEN"
+        headers = ["NO", "NAMA", "NIK", "NO KK", "ALAMAT", "DESA/KELURAHAN", "KECAMATAN", "KABUPATEN/KOTA"]
+        sample_rows = [[1, "JANE DOE", "7301010101010003", "7301010101010004", "JL. MERDEKA NO. 2", "DESA X", "KECAMATAN Y", "KABUPATEN Z"]]
+    else:
+        ws.title = "Hasil Verifikasi"
+        headers = ["NO", "KODE DESA", "NAMA", "NIK", "NO KK", "ALAMAT", "DESA/KELURAHAN", "KECAMATAN", "KABUPATEN/KOTA", "STATUS"]
+        sample_rows = [[1, "1101012001", "JOHN DOE", "7301010101010001", "7301010101010002", "JL. SUDIRMAN NO. 1", "DESA A", "KECAMATAN B", "KABUPATEN C", "LOLOS"]]
+
+    ws.append(headers)
+    for col_idx in range(1, len(headers) + 1):
+        cell = ws.cell(row=1, column=col_idx)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    for row_data in sample_rows:
+        ws.append(row_data)
+
+    for row in ws.iter_rows(min_row=1, max_row=len(sample_rows)+1, min_col=1, max_col=len(headers)):
+        for cell in row:
+            cell.border = thin_border
+            if cell.row > 1:
+                cell.alignment = Alignment(vertical="center")
+
+    for col in ws.columns:
+        max_len = max(len(str(cell.value or '')) for cell in col)
+        col_letter = get_column_letter(col[0].column)
+        ws.column_dimensions[col_letter].width = max(max_len + 4, 14)
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    return StreamingResponse(
+        output,
+        media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={'Content-Disposition': f'attachment; filename="{filename}"'}
+    )
 
 @app.post("/api/export/docx")
 async def export_docx_files(

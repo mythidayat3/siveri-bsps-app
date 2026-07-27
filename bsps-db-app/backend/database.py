@@ -256,14 +256,74 @@ def init_db():
     )
     """)
 
-    # Seed default users if empty
-    cursor.execute("SELECT COUNT(*) as cnt FROM users")
-    if cursor.fetchone()['cnt'] == 0:
-        cursor.execute("INSERT INTO users (username, password, role) VALUES ('yayatbalai', 'semangat45', 'admin')")
-        cursor.execute("INSERT INTO users (username, password, role) VALUES ('balai_sul_3', 'balaimk5', 'viewer')")
+    # 13. Village Codes Table (Master Kode Desa / Kelurahan)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS village_codes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kode_desa TEXT,
+        provinsi TEXT,
+        kabupaten_kota TEXT,
+        kecamatan TEXT,
+        desa_kelurahan TEXT,
+        delineasi TEXT,
+        clean_kab TEXT,
+        clean_kec TEXT,
+        clean_desa TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_village_codes_clean ON village_codes(clean_kab, clean_kec, clean_desa);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_village_codes_lookup ON village_codes(kabupaten_kota, kecamatan, desa_kelurahan);")
 
     conn.commit()
     conn.close()
+
+def normalize_geo_name(name):
+    if not name:
+        return ""
+    name = str(name).strip().upper()
+    for prefix in ["KABUPATEN ", "KAB. ", "KAB ", "KOTA ", "KECAMATAN ", "KEC. ", "KEC ", "DESA ", "KELURAHAN ", "KEL. ", "KEL "]:
+        if name.startswith(prefix):
+            name = name[len(prefix):].strip()
+    return name.replace(" ", "").replace(".", "").replace("-", "")
+
+def lookup_village_code(conn, kabupaten, kecamatan, desa):
+    if not desa:
+        return ""
+    cursor = conn.cursor()
+    # 1. Exact match
+    cursor.execute(
+        "SELECT kode_desa FROM village_codes WHERE UPPER(TRIM(kabupaten_kota)) = UPPER(TRIM(?)) AND UPPER(TRIM(kecamatan)) = UPPER(TRIM(?)) AND UPPER(TRIM(desa_kelurahan)) = UPPER(TRIM(?)) LIMIT 1",
+        (kabupaten or "", kecamatan or "", desa or "")
+    )
+    row = cursor.fetchone()
+    if row and row['kode_desa']:
+        return str(row['kode_desa']).strip()
+    
+    # 2. Normalized match
+    c_kab = normalize_geo_name(kabupaten)
+    c_kec = normalize_geo_name(kecamatan)
+    c_desa = normalize_geo_name(desa)
+    
+    if c_desa and c_kec:
+        cursor.execute(
+            "SELECT kode_desa FROM village_codes WHERE clean_desa = ? AND (clean_kec = ? OR clean_kab = ?) LIMIT 1",
+            (c_desa, c_kec, c_kab)
+        )
+        row = cursor.fetchone()
+        if row and row['kode_desa']:
+            return str(row['kode_desa']).strip()
+        
+    if c_desa:
+        cursor.execute(
+            "SELECT kode_desa FROM village_codes WHERE clean_desa = ? LIMIT 1",
+            (c_desa,)
+        )
+        row = cursor.fetchone()
+        if row and row['kode_desa']:
+            return str(row['kode_desa']).strip()
+        
+    return ""
 
 if __name__ == "__main__":
     init_db()

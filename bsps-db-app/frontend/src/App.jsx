@@ -1001,7 +1001,10 @@ function App() {
           const data = new Uint8Array(e.target.result);
           const workbook = XLSX.read(data, { type: 'array' });
           
-          if (type === 'invers') {
+          if (type === 'village_codes') {
+            resolve({ valid: true });
+            return;
+          } else if (type === 'invers') {
             const sheetName = workbook.SheetNames[0];
             const worksheet = workbook.Sheets[sheetName];
             const json = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
@@ -1098,7 +1101,20 @@ function App() {
     formData.append('file', selectedFile);
 
     try {
-      if (uploadType === 'invers') {
+      if (uploadType === 'village_codes') {
+        const res = await fetch(`${BACKEND_URL}/api/upload/village-codes`, {
+          method: 'POST',
+          body: formData
+        });
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.detail || "Gagal mengunggah file Kode Desa");
+        }
+        const data = await res.json();
+        showToast(data.message || "Berhasil mengunggah database Kode Desa/Kelurahan!");
+        setSelectedFile(null);
+        setUploadType('');
+      } else if (uploadType === 'invers') {
         if (!stageNameInput.trim()) {
           showToast("Silakan masukkan nama tahap", "error");
           return;
@@ -4348,15 +4364,31 @@ function App() {
                   Upload daftar Penerima Bantuan dari SK Dirjen. Akan dicocokkan dengan semua Data Terverifikasi.
                 </p>
               </div>
+
+              <div 
+                className="upload-box"
+                onClick={() => setUploadType('village_codes')}
+                style={{ border: uploadType === 'village_codes' ? '2px solid var(--primary)' : '2px dashed var(--border)' }}
+              >
+                <span style={{ fontSize: "2.5rem" }}><svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "#0284c7" }}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg></span>
+                <h3>4. Unggah Database Kode Desa</h3>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                  Upload database rujukan Kode Desa/Kelurahan nasional untuk auto-fill otomatis saat ekspor BA.
+                </p>
+              </div>
             </div>
 
             {uploadType && uploadType !== 'sk_dirjen' && (
               <form onSubmit={handleUploadSubmit} className="card-section" style={{ marginTop: '24px', backgroundColor: '#fdfdfd' }}>
                 <h3 style={{ marginBottom: '16px', color: 'var(--primary)', fontSize: '1rem' }}>
-                  {uploadType === 'invers' ? "Parameter Unggah berkas INVERS" : "Parameter Unggah berkas Verifikasi Lapangan"}
+                  {uploadType === 'village_codes' ? "Parameter Unggah Master Kode Desa / Kelurahan" : uploadType === 'invers' ? "Parameter Unggah berkas INVERS" : "Parameter Unggah berkas Verifikasi Lapangan"}
                 </h3>
 
-                {uploadType === 'invers' ? (
+                {uploadType === 'village_codes' ? (
+                  <div style={{ marginBottom: '12px', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                    Berkas Excel master kode desa akan disimpan ke database rujukan. Jika nama desa/kecamatan/kabupaten sudah ada, data lama akan diperbarui secara otomatis.
+                  </div>
+                ) : uploadType === 'invers' ? (
                   <div className="form-group">
                     <label className="form-label">Nama Tahap / Sesi INVERS</label>
                     <input 
