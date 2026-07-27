@@ -1,5 +1,6 @@
 import io
 import os
+import time
 import sqlite3
 import openpyxl
 import docx
@@ -548,6 +549,7 @@ async def upload_verified(
             
     conn.commit()
     conn.close()
+    REKAP_CACHE.clear()
     
     return {
         "batch_id": batch_id,
@@ -3081,8 +3083,17 @@ def export_rekap_keseluruhan():
     )
 
 # --- REKAP KESELURUHAN (All stages, per kabupaten) ---
+REKAP_CACHE = {}
+
 @app.get("/api/rekap-keseluruhan")
 def get_rekap_keseluruhan(published_only: int = 0):
+    cache_key = f"rekap_{published_only}"
+    now = time.time()
+    if cache_key in REKAP_CACHE:
+        ts, cached_data = REKAP_CACHE[cache_key]
+        if now - ts < 30:
+            return cached_data
+
     import re
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -3095,7 +3106,6 @@ def get_rekap_keseluruhan(published_only: int = 0):
         return int(match.group()) if match else 999
     all_stages = sorted(all_stages, key=get_stage_num)
     
-    # Build optional published-only filter for verified queries
     published_filter = "AND vb.is_published = 1" if published_only else ""
     
     # Get the full list of unique kabupaten across all stages
@@ -3137,6 +3147,42 @@ def get_rekap_keseluruhan(published_only: int = 0):
         if sid not in sk_by_stage_kab:
             sk_by_stage_kab[sid] = {}
         sk_by_stage_kab[sid][kab] = row['cnt']
+
+    # SQL Aggregation for ALL stages (Invers Alokasi)
+    cursor.execute("""
+        SELECT irv.stage_id, UPPER(TRIM(COALESCE(ir.kabupaten_kota, ''))) as kab, COUNT(*) as cnt
+        FROM invers_records ir
+        JOIN invers_revisions irv ON ir.revision_id = irv.id
+        WHERE irv.is_active = 1 AND TRIM(COALESCE(ir.kabupaten_kota, '')) != ''
+        GROUP BY irv.stage_id, kab
+    """)
+    alokasi_map = {}
+    for row in cursor.fetchall():
+        sid, kab, cnt = row['stage_id'], row['kab'], row['cnt']
+        if sid not in alokasi_map: alokasi_map[sid] = {}
+        alokasi_map[sid][kab] = cnt
+
+    # SQL Aggregation for ALL stages (Verified Records Lolos & Tidak Lolos)
+    cursor.execute(f"""
+        SELECT vb.stage_id, UPPER(TRIM(COALESCE(vr.kabupaten_kota, ''))) as kab, vr.status, COUNT(*) as cnt
+        FROM verified_records vr
+        JOIN verified_batches vb ON vr.batch_id = vb.id
+        LEFT JOIN reconciliation_overrides ro ON ro.original_no_ktp = vr.no_ktp AND ro.stage_id = vb.stage_id
+        WHERE (vr.is_duplicate_in_previous = 0 OR ro.id IS NOT NULL) AND TRIM(COALESCE(vr.kabupaten_kota, '')) != ''
+        {published_filter}
+        GROUP BY vb.stage_id, kab, vr.status
+    """)
+    verif_map = {}
+    for row in cursor.fetchall():
+        sid, kab, st, cnt = row['stage_id'], row['kab'], row['status'], row['cnt']
+        if sid not in verif_map: verif_map[sid] = {}
+        if kab not in verif_map[sid]: verif_map[sid][kab] = {"lolos": 0, "tidak_lolos": 0}
+        if st == 'LOLOS':
+            verif_map[sid][kab]["lolos"] += cnt
+        else:
+            verif_map[sid][kab]["tidak_lolos"] += cnt
+
+    conn.close()
     
     stages_data = []
     
@@ -3144,49 +3190,10 @@ def get_rekap_keseluruhan(published_only: int = 0):
         stage_id = stage['id']
         stage_name = stage['name']
         
-        # Get INVERS records for this stage (alokasi)
-        cursor.execute("""
-            SELECT ir.no_ktp, UPPER(TRIM(COALESCE(ir.kabupaten_kota, ''))) as kab
-            FROM invers_records ir
-            JOIN invers_revisions irv ON ir.revision_id = irv.id
-            WHERE irv.stage_id = ? AND irv.is_active = 1
-        """, (stage_id,))
-        invers_recs = [dict(r) for r in cursor.fetchall()]
+        stage_alokasi = alokasi_map.get(stage_id, {})
+        stage_verif = verif_map.get(stage_id, {})
+        sk_data = sk_by_stage_kab.get(stage_id, {})
         
-        # Get verified records for this stage (non-duplicate OR reconciled)
-        cursor.execute(f"""
-            SELECT vr.no_ktp, vr.status, UPPER(TRIM(COALESCE(vr.kabupaten_kota, ''))) as kab,
-                   vr.is_duplicate_in_previous
-            FROM verified_records vr
-            JOIN verified_batches vb ON vr.batch_id = vb.id
-            LEFT JOIN reconciliation_overrides ro ON ro.original_no_ktp = vr.no_ktp AND ro.stage_id = vb.stage_id
-            WHERE vb.stage_id = ? AND (vr.is_duplicate_in_previous = 0 OR ro.id IS NOT NULL)
-            {published_filter}
-        """, (stage_id,))
-        verified_recs = [dict(r) for r in cursor.fetchall()]
-        
-        # Build alokasi per kabupaten
-        alokasi_by_kab = {}
-        invers_niks = set()
-        for ir in invers_recs:
-            kab = ir['kab'] if ir['kab'] else 'TIDAK DIKETAHUI'
-            alokasi_by_kab[kab] = alokasi_by_kab.get(kab, 0) + 1
-            invers_niks.add(ir['no_ktp'])
-        
-        # Build verifikasi stats per kabupaten
-        verif_by_kab = {}
-        verified_niks = set()
-        for vr in verified_recs:
-            kab = vr['kab'] if vr['kab'] else 'TIDAK DIKETAHUI'
-            if kab not in verif_by_kab:
-                verif_by_kab[kab] = {"lolos": 0, "tidak_lolos": 0}
-            if vr['status'] == 'LOLOS':
-                verif_by_kab[kab]['lolos'] += 1
-            else:
-                verif_by_kab[kab]['tidak_lolos'] += 1
-            verified_niks.add(vr['no_ktp'])
-        
-        # Per-kabupaten table data
         kab_data = []
         total_alokasi = 0
         total_verifikasi = 0
@@ -3196,12 +3203,11 @@ def get_rekap_keseluruhan(published_only: int = 0):
         total_sk_sudah = 0
         total_sk_belum = 0
         
-        sk_data = sk_by_stage_kab.get(stage_id, {})
-        
         for kab in all_kabupaten:
-            alokasi = alokasi_by_kab.get(kab, 0)
-            lolos = verif_by_kab.get(kab, {}).get('lolos', 0)
-            tidak_lolos = verif_by_kab.get(kab, {}).get('tidak_lolos', 0)
+            alokasi = stage_alokasi.get(kab, 0)
+            v_stat = stage_verif.get(kab, {"lolos": 0, "tidak_lolos": 0})
+            lolos = v_stat.get('lolos', 0)
+            tidak_lolos = v_stat.get('tidak_lolos', 0)
             verifikasi = lolos + tidak_lolos
             belum = max(0, alokasi - verifikasi)
             
@@ -3227,7 +3233,6 @@ def get_rekap_keseluruhan(published_only: int = 0):
                 "sk_dirjen_belum": sk_belum
             })
         
-        # Progress bar segments for this stage
         stage_type = "pengganti" if "pengganti" in stage_name.lower() else "murni"
         stages_data.append({
             "stage_id": stage_id,
@@ -3245,10 +3250,12 @@ def get_rekap_keseluruhan(published_only: int = 0):
             }
         })
     
-    return {
+    result = {
         "all_kabupaten": all_kabupaten,
         "stages": stages_data
     }
+    REKAP_CACHE[cache_key] = (now, result)
+    return result
 
 # --- REKAP BATCH BERITA ACARA ---
 @app.get("/api/rekap-batch-ba")
@@ -3826,10 +3833,11 @@ def global_search(
     start = (page - 1) * limit
     paginated = all_records[start:start + limit]
 
-    # Fetch filter options (cascading) based on current records
-    all_kabs = sorted(set(r['kabupaten_kota'] for r in all_records if r.get('kabupaten_kota')))
-    all_kecs = sorted(set(r['kecamatan'] for r in all_records if r.get('kecamatan')))
-    all_desas = sorted(set(r['desa_kelurahan'] for r in all_records if r.get('desa_kelurahan')))
+    # Fetch filter options efficiently
+    all_kabs = sorted(list(set(r['kabupaten_kota'] for r in all_records if r.get('kabupaten_kota'))))
+    all_kecs = sorted(list(set(r['kecamatan'] for r in all_records if r.get('kecamatan'))))
+    all_desas = sorted(list(set(r['desa_kelurahan'] for r in all_records if r.get('desa_kelurahan'))))
+    
     all_tahaps_raw = {}
     for r in all_records:
         tid = r.get('tahap_id')

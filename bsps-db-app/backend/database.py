@@ -274,6 +274,11 @@ def init_db():
     """)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_village_codes_clean ON village_codes(clean_kab, clean_kec, clean_desa);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_village_codes_lookup ON village_codes(kabupaten_kota, kecamatan, desa_kelurahan);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_invers_records_nik ON invers_records(no_ktp);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_invers_records_rev_geo ON invers_records(revision_id, kabupaten_kota);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_verified_records_nik ON verified_records(no_ktp);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_verified_records_batch_status ON verified_records(batch_id, status, kabupaten_kota);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_verified_records_geo ON verified_records(kabupaten_kota, kecamatan, desa_kelurahan, status);")
 
     conn.commit()
     conn.close()
