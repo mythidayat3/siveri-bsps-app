@@ -5373,9 +5373,9 @@ function App() {
                       <table className="rekap-table-unified">
                         <thead>
                           <tr>
-                            <th className="rekap-corner-cell" rowSpan="2" style={{ width: '45px', minWidth: '45px', maxWidth: '45px', left: 0 }}>No</th>
-                            <th className="rekap-corner-cell" rowSpan="2" style={{ width: '220px', minWidth: '220px', maxWidth: '220px', left: '45px', textAlign: 'left', borderRight: '2px solid #bfc6d0' }}>Kabupaten / Kota</th>
-                            <th colSpan="7" className="rekap-corner-cell rekap-total-group-th" style={{ left: '265px', width: '500px', minWidth: '500px', maxWidth: '500px', borderRight: '3px solid #64748b' }}>
+                            <th className="rekap-corner-cell" rowSpan="2" style={{ width: '32px', minWidth: '32px', maxWidth: '32px', left: 0 }}>No</th>
+                            <th className="rekap-corner-cell" rowSpan="2" style={{ width: '155px', minWidth: '155px', maxWidth: '155px', left: '32px', textAlign: 'left', borderRight: '2px solid #bfc6d0' }}>Kabupaten / Kota</th>
+                            <th colSpan="7" className="rekap-corner-cell rekap-total-group-th" style={{ left: '187px', width: '382px', minWidth: '382px', maxWidth: '382px', borderRight: '3px solid #64748b' }}>
                               REKAP TOTAL
                             </th>
                             {groupStages.map(stage => {
@@ -5385,7 +5385,7 @@ function App() {
                               const pctTidakLolos = ((t.tidak_lolos / totalBase) * 100).toFixed(1);
                               const pctBelum = ((t.belum_verifikasi / totalBase) * 100).toFixed(1);
                               return (
-                                <th key={stage.stage_id} colSpan="7" className="rekap-stage-th" style={{ width: '500px', minWidth: '500px', maxWidth: '500px' }}>
+                                <th key={stage.stage_id} colSpan="7" className="rekap-stage-th" style={{ width: '354px', minWidth: '354px', maxWidth: '354px' }}>
                                   <div className="rekap-header-progress-container" style={{ marginBottom: '5px' }}>
                                     <div className="rekap-progress-bar-mini" title={`${stage.stage_name} — Lolos: ${pctLolos}%, Tidak Lolos: ${pctTidakLolos}%, Belum: ${pctBelum}%`}>
                                       <div className="rekap-progress-segment rekap-seg-lolos" style={{ width: `${pctLolos}%`, height: '100%' }}></div>
@@ -5393,28 +5393,28 @@ function App() {
                                       <div className="rekap-progress-segment rekap-seg-belum" style={{ width: `${pctBelum}%`, height: '100%' }}></div>
                                     </div>
                                   </div>
-                                  <div style={{ fontWeight: 700, fontSize: '0.82rem', letterSpacing: '0.3px' }}>{stage.stage_name.toUpperCase()}</div>
+                                  <div style={{ fontWeight: 700, fontSize: '0.8rem', letterSpacing: '0.3px' }}>{stage.stage_name.toUpperCase()}</div>
                                 </th>
                               );
                             })}
                           </tr>
                           <tr>
-                            <th className="rekap-sub-th rekap-sub-total-sticky" style={{ left: '265px', width: '70px', minWidth: '70px', maxWidth: '70px' }}>ALOKASI</th>
-                            <th className="rekap-sub-th rekap-sub-total-sticky" style={{ left: '335px', width: '85px', minWidth: '85px', maxWidth: '85px' }}>VERIFIKASI</th>
-                            <th className="rekap-sub-th rekap-sub-lolos rekap-sub-total-sticky" style={{ left: '420px', width: '70px', minWidth: '70px', maxWidth: '70px' }}>LOLOS</th>
-                            <th className="rekap-sub-th rekap-sub-tidak rekap-sub-total-sticky" style={{ left: '490px', width: '80px', minWidth: '80px', maxWidth: '80px' }}>TIDAK LOLOS</th>
-                            <th className="rekap-sub-th rekap-sub-belum rekap-sub-total-sticky" style={{ left: '570px', width: '65px', minWidth: '65px', maxWidth: '65px' }}>BELUM</th>
-                            <th className="rekap-sub-th rekap-sub-skdirjen-sudah rekap-sub-total-sticky" style={{ left: '635px', width: '65px', minWidth: '65px', maxWidth: '65px' }}>SUDAH</th>
-                            <th className="rekap-sub-th rekap-sub-skdirjen-belum rekap-sub-total-sticky" style={{ left: '700px', width: '65px', minWidth: '65px', maxWidth: '65px', borderRight: '3px solid #64748b' }}>BELUM</th>
+                            <th className="rekap-sub-th rekap-sub-total-sticky" style={{ left: '187px', width: '54px', minWidth: '54px', maxWidth: '54px' }}>ALOKASI</th>
+                            <th className="rekap-sub-th rekap-sub-total-sticky" style={{ left: '241px', width: '58px', minWidth: '58px', maxWidth: '58px' }}>VERIFIKASI</th>
+                            <th className="rekap-sub-th rekap-sub-lolos rekap-sub-total-sticky" style={{ left: '299px', width: '50px', minWidth: '50px', maxWidth: '50px' }}>LOLOS</th>
+                            <th className="rekap-sub-th rekap-sub-tidak rekap-sub-total-sticky" style={{ left: '349px', width: '60px', minWidth: '60px', maxWidth: '60px' }}>TIDAK LOLOS</th>
+                            <th className="rekap-sub-th rekap-sub-belum rekap-sub-total-sticky" style={{ left: '409px', width: '50px', minWidth: '50px', maxWidth: '50px' }}>BELUM</th>
+                            <th className="rekap-sub-th rekap-sub-skdirjen-sudah rekap-sub-total-sticky" style={{ left: '459px', width: '55px', minWidth: '55px', maxWidth: '55px' }}>SUDAH</th>
+                            <th className="rekap-sub-th rekap-sub-skdirjen-belum rekap-sub-total-sticky" style={{ left: '514px', width: '55px', minWidth: '55px', maxWidth: '55px', borderRight: '3px solid #64748b' }}>BELUM</th>
                             {groupStages.map(stage => (
                               <React.Fragment key={stage.stage_id}>
-                                <th className="rekap-sub-th" style={{ width: '70px', minWidth: '70px', maxWidth: '70px' }}>ALOKASI</th>
-                                <th className="rekap-sub-th" style={{ width: '85px', minWidth: '85px', maxWidth: '85px' }}>VERIFIKASI</th>
-                                <th className="rekap-sub-th rekap-sub-lolos" style={{ width: '70px', minWidth: '70px', maxWidth: '70px' }}>LOLOS</th>
-                                <th className="rekap-sub-th rekap-sub-tidak" style={{ width: '80px', minWidth: '80px', maxWidth: '80px' }}>TIDAK LOLOS</th>
-                                <th className="rekap-sub-th rekap-sub-belum" style={{ width: '65px', minWidth: '65px', maxWidth: '65px' }}>BELUM</th>
-                                <th className="rekap-sub-th rekap-sub-skdirjen-sudah" style={{ width: '65px', minWidth: '65px', maxWidth: '65px' }}>SUDAH</th>
-                                <th className="rekap-sub-th rekap-sub-skdirjen-belum" style={{ width: '65px', minWidth: '65px', maxWidth: '65px', borderRight: '2px solid #dee2e6' }}>BELUM</th>
+                                <th className="rekap-sub-th" style={{ width: '48px', minWidth: '48px', maxWidth: '48px' }}>ALOKASI</th>
+                                <th className="rekap-sub-th" style={{ width: '52px', minWidth: '52px', maxWidth: '52px' }}>VERIFIKASI</th>
+                                <th className="rekap-sub-th rekap-sub-lolos" style={{ width: '46px', minWidth: '46px', maxWidth: '46px' }}>LOLOS</th>
+                                <th className="rekap-sub-th rekap-sub-tidak" style={{ width: '54px', minWidth: '54px', maxWidth: '54px' }}>TIDAK LOLOS</th>
+                                <th className="rekap-sub-th rekap-sub-belum" style={{ width: '46px', minWidth: '46px', maxWidth: '46px' }}>BELUM</th>
+                                <th className="rekap-sub-th rekap-sub-skdirjen-sudah" style={{ width: '54px', minWidth: '54px', maxWidth: '54px' }}>SUDAH</th>
+                                <th className="rekap-sub-th rekap-sub-skdirjen-belum" style={{ width: '54px', minWidth: '54px', maxWidth: '54px', borderRight: '2px solid #dee2e6' }}>BELUM</th>
                               </React.Fragment>
                             ))}
                           </tr>
@@ -5440,15 +5440,15 @@ function App() {
                             });
                             return (
                               <tr key={kabIdx} className={!hasAnyData ? 'rekap-row-empty' : ''}>
-                                <td className="rekap-frozen-no" style={{ width: '45px', minWidth: '45px', maxWidth: '45px', left: 0 }}>{kabIdx + 1}</td>
-                                <td className="rekap-frozen-kab" style={{ width: '220px', minWidth: '220px', maxWidth: '220px', left: '45px', whiteSpace: 'normal', wordBreak: 'break-word' }}>{kab}</td>
-                                <td className="rekap-frozen-total" style={{ left: '265px', width: '70px', minWidth: '70px', maxWidth: '70px' }}><button className="rekap-link" onClick={() => navigateToData('invers', { kab })}>{sumA || '-'}</button></td>
-                                <td className="rekap-frozen-total" style={{ left: '335px', width: '85px', minWidth: '85px', maxWidth: '85px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab })}>{sumV || '-'}</button></td>
-                                <td className="rekap-frozen-total rekap-cell-lolos" style={{ left: '420px', width: '70px', minWidth: '70px', maxWidth: '70px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab, status: 'LOLOS' })}>{sumL || '-'}</button></td>
-                                <td className="rekap-frozen-total rekap-cell-tidak" style={{ left: '490px', width: '80px', minWidth: '80px', maxWidth: '80px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab, status: 'TIDAK_LOLOS' })}>{sumTL || '-'}</button></td>
-                                <td className="rekap-frozen-total rekap-cell-belum" style={{ left: '570px', width: '65px', minWidth: '65px', maxWidth: '65px' }}><button className="rekap-link" onClick={() => navigateToData('invers', { kab, status: 'BELUM' })}>{sumB || '-'}</button></td>
-                                <td className="rekap-frozen-total rekap-cell-skdirjen" style={{ left: '635px', width: '65px', minWidth: '65px', maxWidth: '65px' }}><span className="sk-dirjen-badge sudah">{sumSKS || '-'}</span></td>
-                                <td className="rekap-frozen-total rekap-cell-skdirjen" style={{ left: '700px', width: '65px', minWidth: '65px', maxWidth: '65px', borderRight: '3px solid #64748b' }}><span className="sk-dirjen-badge belum">{sumSKB || '-'}</span></td>
+                                <td className="rekap-frozen-no" style={{ width: '32px', minWidth: '32px', maxWidth: '32px', left: 0 }}>{kabIdx + 1}</td>
+                                <td className="rekap-frozen-kab" style={{ width: '155px', minWidth: '155px', maxWidth: '155px', left: '32px', whiteSpace: 'normal', wordBreak: 'break-word' }}>{kab}</td>
+                                <td className="rekap-frozen-total" style={{ left: '187px', width: '54px', minWidth: '54px', maxWidth: '54px' }}><button className="rekap-link" onClick={() => navigateToData('invers', { kab })}>{sumA || '-'}</button></td>
+                                <td className="rekap-frozen-total" style={{ left: '241px', width: '58px', minWidth: '58px', maxWidth: '58px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab })}>{sumV || '-'}</button></td>
+                                <td className="rekap-frozen-total rekap-cell-lolos" style={{ left: '299px', width: '50px', minWidth: '50px', maxWidth: '50px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab, status: 'LOLOS' })}>{sumL || '-'}</button></td>
+                                <td className="rekap-frozen-total rekap-cell-tidak" style={{ left: '349px', width: '60px', minWidth: '60px', maxWidth: '60px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab, status: 'TIDAK_LOLOS' })}>{sumTL || '-'}</button></td>
+                                <td className="rekap-frozen-total rekap-cell-belum" style={{ left: '409px', width: '50px', minWidth: '50px', maxWidth: '50px' }}><button className="rekap-link" onClick={() => navigateToData('invers', { kab, status: 'BELUM' })}>{sumB || '-'}</button></td>
+                                <td className="rekap-frozen-total rekap-cell-skdirjen" style={{ left: '459px', width: '55px', minWidth: '55px', maxWidth: '55px' }}><span className="sk-dirjen-badge sudah">{sumSKS || '-'}</span></td>
+                                <td className="rekap-frozen-total rekap-cell-skdirjen" style={{ left: '514px', width: '55px', minWidth: '55px', maxWidth: '55px', borderRight: '3px solid #64748b' }}><span className="sk-dirjen-badge belum">{sumSKB || '-'}</span></td>
                                 {groupStages.map(stage => {
                                   const kd = stage.kabupaten_data[kabIdx];
                                   const a = kd?.alokasi || 0;
@@ -5460,13 +5460,13 @@ function App() {
                                   const skb = kd?.sk_dirjen_belum || 0;
                                   return (
                                     <React.Fragment key={stage.stage_id}>
-                                      <td className="rekap-cell" style={{ width: '70px', minWidth: '70px', maxWidth: '70px' }}><button className="rekap-link" onClick={() => navigateToData('invers', { kab, tahap: stage.stage_id })}>{a || '-'}</button></td>
-                                      <td className="rekap-cell" style={{ width: '85px', minWidth: '85px', maxWidth: '85px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab, tahap: stage.stage_id })}>{v || '-'}</button></td>
-                                      <td className="rekap-cell rekap-cell-lolos" style={{ width: '70px', minWidth: '70px', maxWidth: '70px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab, tahap: stage.stage_id, status: 'LOLOS' })}>{l || '-'}</button></td>
-                                      <td className="rekap-cell rekap-cell-tidak" style={{ width: '80px', minWidth: '80px', maxWidth: '80px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab, tahap: stage.stage_id, status: 'TIDAK_LOLOS' })}>{tl || '-'}</button></td>
-                                      <td className="rekap-cell rekap-cell-belum" style={{ width: '65px', minWidth: '65px', maxWidth: '65px' }}><button className="rekap-link" onClick={() => navigateToData('invers', { kab, tahap: stage.stage_id, status: 'BELUM' })}>{b || '-'}</button></td>
-                                      <td className="rekap-cell rekap-cell-skdirjen" style={{ width: '65px', minWidth: '65px', maxWidth: '65px' }}><span className="sk-dirjen-badge sudah">{sks || '-'}</span></td>
-                                      <td className="rekap-cell rekap-cell-skdirjen" style={{ width: '65px', minWidth: '65px', maxWidth: '65px', borderRight: '2px solid #dee2e6' }}><span className="sk-dirjen-badge belum">{skb || '-'}</span></td>
+                                      <td className="rekap-cell" style={{ width: '48px', minWidth: '48px', maxWidth: '48px' }}><button className="rekap-link" onClick={() => navigateToData('invers', { kab, tahap: stage.stage_id })}>{a || '-'}</button></td>
+                                      <td className="rekap-cell" style={{ width: '52px', minWidth: '52px', maxWidth: '52px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab, tahap: stage.stage_id })}>{v || '-'}</button></td>
+                                      <td className="rekap-cell rekap-cell-lolos" style={{ width: '46px', minWidth: '46px', maxWidth: '46px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab, tahap: stage.stage_id, status: 'LOLOS' })}>{l || '-'}</button></td>
+                                      <td className="rekap-cell rekap-cell-tidak" style={{ width: '54px', minWidth: '54px', maxWidth: '54px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab, tahap: stage.stage_id, status: 'TIDAK_LOLOS' })}>{tl || '-'}</button></td>
+                                      <td className="rekap-cell rekap-cell-belum" style={{ width: '46px', minWidth: '46px', maxWidth: '46px' }}><button className="rekap-link" onClick={() => navigateToData('invers', { kab, tahap: stage.stage_id, status: 'BELUM' })}>{b || '-'}</button></td>
+                                      <td className="rekap-cell rekap-cell-skdirjen" style={{ width: '54px', minWidth: '54px', maxWidth: '54px' }}><span className="sk-dirjen-badge sudah">{sks || '-'}</span></td>
+                                      <td className="rekap-cell rekap-cell-skdirjen" style={{ width: '54px', minWidth: '54px', maxWidth: '54px', borderRight: '2px solid #dee2e6' }}><span className="sk-dirjen-badge belum">{skb || '-'}</span></td>
                                     </React.Fragment>
                                   );
                                 })}
@@ -5476,8 +5476,8 @@ function App() {
                         </tbody>
                         <tfoot>
                           <tr className="rekap-footer-row">
-                            <td className="rekap-footer-frozen" style={{ left: 0, width: '45px', minWidth: '45px', maxWidth: '45px' }}></td>
-                            <td className="rekap-footer-frozen" style={{ left: '45px', width: '220px', minWidth: '220px', maxWidth: '220px', fontWeight: 700, textAlign: 'left', borderRight: '2px solid #bfc6d0' }}>TOTAL</td>
+                            <td className="rekap-footer-frozen" style={{ left: 0, width: '32px', minWidth: '32px', maxWidth: '32px' }}></td>
+                            <td className="rekap-footer-frozen" style={{ left: '32px', width: '155px', minWidth: '155px', maxWidth: '155px', fontWeight: 700, textAlign: 'left', borderRight: '2px solid #bfc6d0' }}>TOTAL</td>
                             {(() => {
                               let gA = 0, gV = 0, gL = 0, gTL = 0, gB = 0, gSKS = 0, gSKB = 0;
                               groupStages.forEach(s => {
@@ -5492,30 +5492,30 @@ function App() {
                               });
                                return (
                                 <>
-                                  <td className="rekap-footer-frozen rekap-footer-total-sticky" style={{ left: '265px', width: '70px', minWidth: '70px', maxWidth: '70px' }}><button className="rekap-link" onClick={() => navigateToData('invers')}>{gA}</button></td>
-                                  <td className="rekap-footer-frozen rekap-footer-total-sticky" style={{ left: '335px', width: '85px', minWidth: '85px', maxWidth: '85px' }}><button className="rekap-link" onClick={() => navigateToData('verified')}>{gV}</button></td>
-                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-lolos" style={{ left: '420px', width: '70px', minWidth: '70px', maxWidth: '70px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { status: 'LOLOS' })}>{gL}</button></td>
-                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-tidak" style={{ left: '490px', width: '80px', minWidth: '80px', maxWidth: '80px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { status: 'TIDAK_LOLOS' })}>{gTL}</button></td>
-                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-belum" style={{ left: '570px', width: '65px', minWidth: '65px', maxWidth: '65px' }}><button className="rekap-link" onClick={() => navigateToData('invers', { status: 'BELUM' })}>{gB}</button></td>
-                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-skdirjen" style={{ left: '635px', width: '65px', minWidth: '65px', maxWidth: '65px' }}><span className="sk-dirjen-badge sudah">{gSKS}</span></td>
-                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-skdirjen" style={{ left: '700px', width: '65px', minWidth: '65px', maxWidth: '65px', borderRight: '3px solid #64748b' }}><span className="sk-dirjen-badge belum">{gSKB}</span></td>
+                                  <td className="rekap-footer-frozen rekap-footer-total-sticky" style={{ left: '187px', width: '54px', minWidth: '54px', maxWidth: '54px' }}><button className="rekap-link" onClick={() => navigateToData('invers')}>{gA}</button></td>
+                                  <td className="rekap-footer-frozen rekap-footer-total-sticky" style={{ left: '241px', width: '58px', minWidth: '58px', maxWidth: '58px' }}><button className="rekap-link" onClick={() => navigateToData('verified')}>{gV}</button></td>
+                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-lolos" style={{ left: '299px', width: '50px', minWidth: '50px', maxWidth: '50px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { status: 'LOLOS' })}>{gL}</button></td>
+                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-tidak" style={{ left: '349px', width: '60px', minWidth: '60px', maxWidth: '60px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { status: 'TIDAK_LOLOS' })}>{gTL}</button></td>
+                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-belum" style={{ left: '409px', width: '50px', minWidth: '50px', maxWidth: '50px' }}><button className="rekap-link" onClick={() => navigateToData('invers', { status: 'BELUM' })}>{gB}</button></td>
+                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-skdirjen" style={{ left: '459px', width: '55px', minWidth: '55px', maxWidth: '55px' }}><span className="sk-dirjen-badge sudah">{gSKS}</span></td>
+                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-skdirjen" style={{ left: '514px', width: '55px', minWidth: '55px', maxWidth: '55px', borderRight: '3px solid #64748b' }}><span className="sk-dirjen-badge belum">{gSKB}</span></td>
                                 </>
                                );
-                             })()}
-                             {groupStages.map(stage => {
-                               const t = stage.totals;
-                               return (
-                                 <React.Fragment key={stage.stage_id}>
-                                   <td className="rekap-footer-cell" style={{ width: '70px', minWidth: '70px', maxWidth: '70px' }}><button className="rekap-link" onClick={() => navigateToData('invers', { tahap: stage.stage_id })}>{t.alokasi}</button></td>
-                                   <td className="rekap-footer-cell" style={{ width: '85px', minWidth: '85px', maxWidth: '85px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { tahap: stage.stage_id })}>{t.verifikasi}</button></td>
-                                   <td className="rekap-footer-cell rekap-cell-lolos" style={{ width: '70px', minWidth: '70px', maxWidth: '70px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { tahap: stage.stage_id, status: 'LOLOS' })}>{t.lolos}</button></td>
-                                   <td className="rekap-footer-cell rekap-cell-tidak" style={{ width: '80px', minWidth: '80px', maxWidth: '80px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { tahap: stage.stage_id, status: 'TIDAK_LOLOS' })}>{t.tidak_lolos}</button></td>
-                                   <td className="rekap-footer-cell rekap-cell-belum" style={{ width: '65px', minWidth: '65px', maxWidth: '65px' }}><button className="rekap-link" onClick={() => navigateToData('invers', { tahap: stage.stage_id, status: 'BELUM' })}>{t.belum_verifikasi}</button></td>
-                                   <td className="rekap-footer-cell rekap-cell-skdirjen" style={{ width: '65px', minWidth: '65px', maxWidth: '65px' }}><span className="sk-dirjen-badge sudah">{t.sk_dirjen_sudah || '-'}</span></td>
-                                   <td className="rekap-footer-cell rekap-cell-skdirjen" style={{ width: '65px', minWidth: '65px', maxWidth: '65px', borderRight: '2px solid #dee2e6' }}><span className="sk-dirjen-badge belum">{t.sk_dirjen_belum || '-'}</span></td>
-                                 </React.Fragment>
-                               );
-                             })}
+                              })()}
+                              {groupStages.map(stage => {
+                                const t = stage.totals;
+                                return (
+                                  <React.Fragment key={stage.stage_id}>
+                                    <td className="rekap-footer-cell" style={{ width: '48px', minWidth: '48px', maxWidth: '48px' }}><button className="rekap-link" onClick={() => navigateToData('invers', { tahap: stage.stage_id })}>{t.alokasi}</button></td>
+                                    <td className="rekap-footer-cell" style={{ width: '52px', minWidth: '52px', maxWidth: '52px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { tahap: stage.stage_id })}>{t.verifikasi}</button></td>
+                                    <td className="rekap-footer-cell rekap-cell-lolos" style={{ width: '46px', minWidth: '46px', maxWidth: '46px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { tahap: stage.stage_id, status: 'LOLOS' })}>{t.lolos}</button></td>
+                                    <td className="rekap-footer-cell rekap-cell-tidak" style={{ width: '54px', minWidth: '54px', maxWidth: '54px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { tahap: stage.stage_id, status: 'TIDAK_LOLOS' })}>{t.tidak_lolos}</button></td>
+                                    <td className="rekap-footer-cell rekap-cell-belum" style={{ width: '46px', minWidth: '46px', maxWidth: '46px' }}><button className="rekap-link" onClick={() => navigateToData('invers', { tahap: stage.stage_id, status: 'BELUM' })}>{t.belum_verifikasi}</button></td>
+                                    <td className="rekap-footer-cell rekap-cell-skdirjen" style={{ width: '54px', minWidth: '54px', maxWidth: '54px' }}><span className="sk-dirjen-badge sudah">{t.sk_dirjen_sudah || '-'}</span></td>
+                                    <td className="rekap-footer-cell rekap-cell-skdirjen" style={{ width: '54px', minWidth: '54px', maxWidth: '54px', borderRight: '2px solid #dee2e6' }}><span className="sk-dirjen-badge belum">{t.sk_dirjen_belum || '-'}</span></td>
+                                  </React.Fragment>
+                                );
+                              })}
                           </tr>
                         </tfoot>
                       </table>
@@ -5593,9 +5593,9 @@ function App() {
                       <table className="rekap-table-unified">
                         <thead>
                           <tr>
-                            <th className="rekap-corner-cell" rowSpan="2" style={{ width: '45px', minWidth: '45px', maxWidth: '45px', left: 0 }}>No</th>
-                            <th className="rekap-corner-cell" rowSpan="2" style={{ width: '220px', minWidth: '220px', maxWidth: '220px', left: '45px', textAlign: 'left', borderRight: '2px solid #bfc6d0', whiteSpace: 'normal', wordBreak: 'break-word' }}>Kabupaten / Kota</th>
-                            <th colSpan="5" className="rekap-corner-cell rekap-total-group-th" style={{ left: '265px', width: '390px', minWidth: '390px', maxWidth: '390px', borderRight: '2px solid #bfc6d0' }}>
+                            <th className="rekap-corner-cell" rowSpan="2" style={{ width: '32px', minWidth: '32px', maxWidth: '32px', left: 0 }}>No</th>
+                            <th className="rekap-corner-cell" rowSpan="2" style={{ width: '155px', minWidth: '155px', maxWidth: '155px', left: '32px', textAlign: 'left', borderRight: '2px solid #bfc6d0', whiteSpace: 'normal', wordBreak: 'break-word' }}>Kabupaten / Kota</th>
+                            <th colSpan="5" className="rekap-corner-cell rekap-total-group-th" style={{ left: '187px', width: '272px', minWidth: '272px', maxWidth: '272px', borderRight: '2px solid #bfc6d0' }}>
                               REKAP TOTAL
                             </th>
                             {groupStages.map(stage => {
@@ -5613,17 +5613,17 @@ function App() {
                                       <div className="rekap-progress-segment rekap-seg-belum" style={{ width: `${pctBelum}%`, height: '100%' }}></div>
                                     </div>
                                   </div>
-                                  <div style={{ fontWeight: 700, fontSize: '0.82rem', letterSpacing: '0.3px' }}>{stage.stage_name.toUpperCase()}</div>
+                                  <div style={{ fontWeight: 700, fontSize: '0.8rem', letterSpacing: '0.3px' }}>{stage.stage_name.toUpperCase()}</div>
                                 </th>
                               );
                             })}
                           </tr>
                           <tr>
-                            <th className="rekap-sub-th rekap-sub-total-sticky" style={{ left: '265px', width: '70px', minWidth: '70px', maxWidth: '70px' }}>ALOKASI</th>
-                            <th className="rekap-sub-th rekap-sub-total-sticky" style={{ left: '335px', width: '85px', minWidth: '85px', maxWidth: '85px' }}>VERIFIKASI</th>
-                            <th className="rekap-sub-th rekap-sub-lolos rekap-sub-total-sticky" style={{ left: '420px', width: '70px', minWidth: '70px', maxWidth: '70px' }}>LOLOS</th>
-                            <th className="rekap-sub-th rekap-sub-tidak rekap-sub-total-sticky" style={{ left: '490px', width: '90px', minWidth: '90px', maxWidth: '90px' }}>TIDAK LOLOS</th>
-                            <th className="rekap-sub-th rekap-sub-belum rekap-sub-total-sticky" style={{ left: '580px', width: '75px', minWidth: '75px', maxWidth: '75px', borderRight: '2px solid #bfc6d0' }}>BELUM</th>
+                            <th className="rekap-sub-th rekap-sub-total-sticky" style={{ left: '187px', width: '54px', minWidth: '54px', maxWidth: '54px' }}>ALOKASI</th>
+                            <th className="rekap-sub-th rekap-sub-total-sticky" style={{ left: '241px', width: '58px', minWidth: '58px', maxWidth: '58px' }}>VERIFIKASI</th>
+                            <th className="rekap-sub-th rekap-sub-lolos rekap-sub-total-sticky" style={{ left: '299px', width: '50px', minWidth: '50px', maxWidth: '50px' }}>LOLOS</th>
+                            <th className="rekap-sub-th rekap-sub-tidak rekap-sub-total-sticky" style={{ left: '349px', width: '60px', minWidth: '60px', maxWidth: '60px' }}>TIDAK LOLOS</th>
+                            <th className="rekap-sub-th rekap-sub-belum rekap-sub-total-sticky" style={{ left: '409px', width: '50px', minWidth: '50px', maxWidth: '50px', borderRight: '2px solid #bfc6d0' }}>BELUM</th>
                             {groupStages.map(stage => (
                               <React.Fragment key={stage.stage_id}>
                                 <th className="rekap-sub-th">ALOKASI</th>
@@ -5654,13 +5654,13 @@ function App() {
                             });
                             return (
                               <tr key={kabIdx} className={!hasAnyData ? 'rekap-row-empty' : ''}>
-                                <td className="rekap-frozen-no" style={{ width: '45px', minWidth: '45px', maxWidth: '45px', left: 0 }}>{kabIdx + 1}</td>
-                                <td className="rekap-frozen-kab" style={{ width: '220px', minWidth: '220px', maxWidth: '220px', left: '45px', whiteSpace: 'normal', wordBreak: 'break-word' }}>{kab}</td>
-                                <td className="rekap-frozen-total" style={{ left: '265px', width: '70px', minWidth: '70px', maxWidth: '70px' }}><button className="rekap-link" onClick={() => navigateToData('invers', { kab })}>{sumA || '-'}</button></td>
-                                <td className="rekap-frozen-total" style={{ left: '335px', width: '85px', minWidth: '85px', maxWidth: '85px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab })}>{sumV || '-'}</button></td>
-                                <td className="rekap-frozen-total rekap-cell-lolos" style={{ left: '420px', width: '70px', minWidth: '70px', maxWidth: '70px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab, status: 'LOLOS' })}>{sumL || '-'}</button></td>
-                                <td className="rekap-frozen-total rekap-cell-tidak" style={{ left: '490px', width: '90px', minWidth: '90px', maxWidth: '90px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab, status: 'TIDAK_LOLOS' })}>{sumTL || '-'}</button></td>
-                                <td className="rekap-frozen-total rekap-cell-belum" style={{ left: '580px', width: '75px', minWidth: '75px', maxWidth: '75px', borderRight: '2px solid #bfc6d0' }}><button className="rekap-link" onClick={() => navigateToData('invers', { kab, status: 'BELUM' })}>{sumB || '-'}</button></td>
+                                <td className="rekap-frozen-no" style={{ width: '32px', minWidth: '32px', maxWidth: '32px', left: 0 }}>{kabIdx + 1}</td>
+                                <td className="rekap-frozen-kab" style={{ width: '155px', minWidth: '155px', maxWidth: '155px', left: '32px', whiteSpace: 'normal', wordBreak: 'break-word' }}>{kab}</td>
+                                <td className="rekap-frozen-total" style={{ left: '187px', width: '54px', minWidth: '54px', maxWidth: '54px' }}><button className="rekap-link" onClick={() => navigateToData('invers', { kab })}>{sumA || '-'}</button></td>
+                                <td className="rekap-frozen-total" style={{ left: '241px', width: '58px', minWidth: '58px', maxWidth: '58px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab })}>{sumV || '-'}</button></td>
+                                <td className="rekap-frozen-total rekap-cell-lolos" style={{ left: '299px', width: '50px', minWidth: '50px', maxWidth: '50px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab, status: 'LOLOS' })}>{sumL || '-'}</button></td>
+                                <td className="rekap-frozen-total rekap-cell-tidak" style={{ left: '349px', width: '60px', minWidth: '60px', maxWidth: '60px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab, status: 'TIDAK_LOLOS' })}>{sumTL || '-'}</button></td>
+                                <td className="rekap-frozen-total rekap-cell-belum" style={{ left: '409px', width: '50px', minWidth: '50px', maxWidth: '50px', borderRight: '2px solid #bfc6d0' }}><button className="rekap-link" onClick={() => navigateToData('invers', { kab, status: 'BELUM' })}>{sumB || '-'}</button></td>
                                 {groupStages.map(stage => {
                                   const kd = stage.kabupaten_data[kabIdx];
                                   const a = kd?.alokasi || 0;
@@ -5684,8 +5684,8 @@ function App() {
                         </tbody>
                         <tfoot>
                           <tr className="rekap-footer-row">
-                            <td className="rekap-footer-frozen" style={{ left: 0, width: '45px', minWidth: '45px', maxWidth: '45px' }}></td>
-                            <td className="rekap-footer-frozen" style={{ left: '45px', width: '220px', minWidth: '220px', maxWidth: '220px', fontWeight: 700, textAlign: 'left', borderRight: '2px solid #bfc6d0' }}>TOTAL</td>
+                            <td className="rekap-footer-frozen" style={{ left: 0, width: '32px', minWidth: '32px', maxWidth: '32px' }}></td>
+                            <td className="rekap-footer-frozen" style={{ left: '32px', width: '155px', minWidth: '155px', maxWidth: '155px', fontWeight: 700, textAlign: 'left', borderRight: '2px solid #bfc6d0' }}>TOTAL</td>
                             {(() => {
                               let gA = 0, gV = 0, gL = 0, gTL = 0, gB = 0;
                               groupStages.forEach(s => {
@@ -5698,26 +5698,26 @@ function App() {
                               });
                                return (
                                 <>
-                                  <td className="rekap-footer-frozen rekap-footer-total-sticky" style={{ left: '265px', width: '70px', minWidth: '70px', maxWidth: '70px' }}><button className="rekap-link" onClick={() => navigateToData('invers')}>{gA}</button></td>
-                                  <td className="rekap-footer-frozen rekap-footer-total-sticky" style={{ left: '335px', width: '85px', minWidth: '85px', maxWidth: '85px' }}><button className="rekap-link" onClick={() => navigateToData('verified')}>{gV}</button></td>
-                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-lolos" style={{ left: '420px', width: '70px', minWidth: '70px', maxWidth: '70px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { status: 'LOLOS' })}>{gL}</button></td>
-                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-tidak" style={{ left: '490px', width: '90px', minWidth: '90px', maxWidth: '90px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { status: 'TIDAK_LOLOS' })}>{gTL}</button></td>
-                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-belum" style={{ left: '580px', width: '75px', minWidth: '75px', maxWidth: '75px', borderRight: '2px solid #bfc6d0' }}><button className="rekap-link" onClick={() => navigateToData('invers', { status: 'BELUM' })}>{gB}</button></td>
+                                  <td className="rekap-footer-frozen rekap-footer-total-sticky" style={{ left: '187px', width: '54px', minWidth: '54px', maxWidth: '54px' }}><button className="rekap-link" onClick={() => navigateToData('invers')}>{gA}</button></td>
+                                  <td className="rekap-footer-frozen rekap-footer-total-sticky" style={{ left: '241px', width: '58px', minWidth: '58px', maxWidth: '58px' }}><button className="rekap-link" onClick={() => navigateToData('verified')}>{gV}</button></td>
+                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-lolos" style={{ left: '299px', width: '50px', minWidth: '50px', maxWidth: '50px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { status: 'LOLOS' })}>{gL}</button></td>
+                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-tidak" style={{ left: '349px', width: '60px', minWidth: '60px', maxWidth: '60px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { status: 'TIDAK_LOLOS' })}>{gTL}</button></td>
+                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-belum" style={{ left: '409px', width: '50px', minWidth: '50px', maxWidth: '50px', borderRight: '2px solid #bfc6d0' }}><button className="rekap-link" onClick={() => navigateToData('invers', { status: 'BELUM' })}>{gB}</button></td>
                                 </>
                                );
-                             })()}
-                             {groupStages.map(stage => {
-                               const t = stage.totals;
-                               return (
-                                 <React.Fragment key={stage.stage_id}>
-                                   <td className="rekap-footer-cell"><button className="rekap-link" onClick={() => navigateToData('invers', { tahap: stage.stage_id })}>{t.alokasi}</button></td>
-                                   <td className="rekap-footer-cell"><button className="rekap-link" onClick={() => navigateToData('verified', { tahap: stage.stage_id })}>{t.verifikasi}</button></td>
-                                   <td className="rekap-footer-cell rekap-cell-lolos"><button className="rekap-link" onClick={() => navigateToData('verified', { tahap: stage.stage_id, status: 'LOLOS' })}>{t.lolos}</button></td>
-                                   <td className="rekap-footer-cell rekap-cell-tidak"><button className="rekap-link" onClick={() => navigateToData('verified', { tahap: stage.stage_id, status: 'TIDAK_LOLOS' })}>{t.tidak_lolos}</button></td>
-                                   <td className="rekap-footer-cell rekap-cell-belum" style={{ borderRight: '2px solid #dee2e6' }}><button className="rekap-link" onClick={() => navigateToData('invers', { tahap: stage.stage_id, status: 'BELUM' })}>{t.belum_verifikasi}</button></td>
-                                 </React.Fragment>
-                               );
-                             })}
+                              })()}
+                              {groupStages.map(stage => {
+                                const t = stage.totals;
+                                return (
+                                  <React.Fragment key={stage.stage_id}>
+                                    <td className="rekap-footer-cell"><button className="rekap-link" onClick={() => navigateToData('invers', { tahap: stage.stage_id })}>{t.alokasi}</button></td>
+                                    <td className="rekap-footer-cell"><button className="rekap-link" onClick={() => navigateToData('verified', { tahap: stage.stage_id })}>{t.verifikasi}</button></td>
+                                    <td className="rekap-footer-cell rekap-cell-lolos"><button className="rekap-link" onClick={() => navigateToData('verified', { tahap: stage.stage_id, status: 'LOLOS' })}>{t.lolos}</button></td>
+                                    <td className="rekap-footer-cell rekap-cell-tidak"><button className="rekap-link" onClick={() => navigateToData('verified', { tahap: stage.stage_id, status: 'TIDAK_LOLOS' })}>{t.tidak_lolos}</button></td>
+                                    <td className="rekap-footer-cell rekap-cell-belum" style={{ borderRight: '2px solid #dee2e6' }}><button className="rekap-link" onClick={() => navigateToData('invers', { tahap: stage.stage_id, status: 'BELUM' })}>{t.belum_verifikasi}</button></td>
+                                  </React.Fragment>
+                                );
+                              })}
                           </tr>
                         </tfoot>
                       </table>
