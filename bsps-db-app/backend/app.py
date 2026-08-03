@@ -832,6 +832,9 @@ def reorder_verified_batches(body: dict = Body(...)):
 @app.post("/api/verified/record/{record_id}/update-status")
 def update_verified_record_status(record_id: int, body: dict = Body(...)):
     new_status = body.get("status", "").upper().strip()
+    alasan_tidak_lolos = body.get("alasan_tidak_lolos", "")
+    keterangan = body.get("keterangan", "")
+
     if new_status not in ["LOLOS", "TIDAK LOLOS"]:
         raise HTTPException(status_code=400, detail="Status harus 'LOLOS' atau 'TIDAK LOLOS'")
         
@@ -843,7 +846,18 @@ def update_verified_record_status(record_id: int, body: dict = Body(...)):
         if not rec:
             raise HTTPException(status_code=404, detail="Data terverifikasi tidak ditemukan")
             
-        cursor.execute("UPDATE verified_records SET status = ? WHERE id = ?", (new_status, record_id))
+        if new_status == "TIDAK LOLOS":
+            cursor.execute("""
+                UPDATE verified_records 
+                SET status = ?, alasan_tidak_lolos = ?, keterangan = ? 
+                WHERE id = ?
+            """, (new_status, alasan_tidak_lolos, keterangan, record_id))
+        else:
+            cursor.execute("""
+                UPDATE verified_records 
+                SET status = ? 
+                WHERE id = ?
+            """, (new_status, record_id))
         conn.commit()
     except HTTPException:
         conn.close()
@@ -1172,9 +1186,18 @@ def get_overview_tables(stage_id: int):
     for row in cursor.fetchall():
         row_dict = dict(row)
         invers_nik = row_dict.pop('invers_nik', None) or row_dict.get('no_ktp', '')
-        # Store with invers NIK as key so lookup by invers NIK works
         if invers_nik and invers_nik not in verified_map:
             verified_map[invers_nik] = row_dict
+
+    # Ambil NIK yang terikat SK Dirjen
+    cursor.execute("""
+        SELECT DISTINCT vr.no_ktp
+        FROM sk_dirjen_matches m
+        JOIN verified_records vr ON vr.id = m.verified_record_id
+        WHERE m.verified_stage_id = ?
+          AND (m.match_type = 'PERFECT' OR (m.match_type = 'NEEDS_APPROVAL' AND m.override_status = 'APPROVED') OR m.match_type = 'MANUAL_PAIR')
+    """, (stage_id,))
+    sk_nik_set = set(row['no_ktp'].strip() for row in cursor.fetchall() if row['no_ktp'])
     conn.close()
             
     # 1. Agregasi Kabupaten
@@ -1189,37 +1212,46 @@ def get_overview_tables(stage_id: int):
         kab = (ir["kabupaten_kota"] or "LAINNYA").upper().strip()
         kec = (ir["kecamatan"] or "LAINNYA").upper().strip()
         peng = (ir["pengusul"] or "LAINNYA").upper().strip()
+        nik = (ir["no_ktp"] or "").strip()
         
         # Check verified match
-        v = verified_map.get(ir["no_ktp"])
+        v = verified_map.get(nik)
         is_lolos = 1 if v and v["status"] == "LOLOS" else 0
         is_tidak_lolos = 1 if v and v["status"] == "TIDAK LOLOS" else 0
         is_belum = 1 if not v else 0
+        has_sk = 1 if (is_lolos and nik in sk_nik_set) else 0
         
         # Kabupaten
         if kab not in kab_stats:
-            kab_stats[kab] = {"total_cpb": 0, "lolos": 0, "tidak_lolos": 0, "belum_verifikasi": 0}
+            kab_stats[kab] = {"total_cpb": 0, "lolos": 0, "tidak_lolos": 0, "belum_verifikasi": 0, "sk_dirjen_sudah": 0, "sk_dirjen_belum": 0}
         kab_stats[kab]["total_cpb"] += 1
         kab_stats[kab]["lolos"] += is_lolos
         kab_stats[kab]["tidak_lolos"] += is_tidak_lolos
         kab_stats[kab]["belum_verifikasi"] += is_belum
+        kab_stats[kab]["sk_dirjen_sudah"] += has_sk
         
         # Kecamatan
         if kec not in kec_stats:
-            kec_stats[kec] = {"total_cpb": 0, "lolos": 0, "tidak_lolos": 0, "belum_verifikasi": 0}
+            kec_stats[kec] = {"total_cpb": 0, "lolos": 0, "tidak_lolos": 0, "belum_verifikasi": 0, "sk_dirjen_sudah": 0, "sk_dirjen_belum": 0}
         kec_stats[kec]["total_cpb"] += 1
         kec_stats[kec]["lolos"] += is_lolos
         kec_stats[kec]["tidak_lolos"] += is_tidak_lolos
         kec_stats[kec]["belum_verifikasi"] += is_belum
+        kec_stats[kec]["sk_dirjen_sudah"] += has_sk
         
         # Pengusul
         if peng not in pengusul_stats:
-            pengusul_stats[peng] = {"total_cpb": 0, "lolos": 0, "tidak_lolos": 0, "belum_verifikasi": 0}
+            pengusul_stats[peng] = {"total_cpb": 0, "lolos": 0, "tidak_lolos": 0, "belum_verifikasi": 0, "sk_dirjen_sudah": 0, "sk_dirjen_belum": 0}
         pengusul_stats[peng]["total_cpb"] += 1
         pengusul_stats[peng]["lolos"] += is_lolos
         pengusul_stats[peng]["tidak_lolos"] += is_tidak_lolos
         pengusul_stats[peng]["belum_verifikasi"] += is_belum
+        pengusul_stats[peng]["sk_dirjen_sudah"] += has_sk
         
+    for k in kab_stats.values(): k["sk_dirjen_belum"] = max(0, k["lolos"] - k["sk_dirjen_sudah"])
+    for kc in kec_stats.values(): kc["sk_dirjen_belum"] = max(0, kc["lolos"] - kc["sk_dirjen_sudah"])
+    for p in pengusul_stats.values(): p["sk_dirjen_belum"] = max(0, p["lolos"] - p["sk_dirjen_sudah"])
+
     return {
         "kabupaten": [{"name": k, **v} for k, v in kab_stats.items()],
         "kecamatan": [{"name": k, **v} for k, v in kec_stats.items()],
@@ -1261,6 +1293,16 @@ def get_pengusul_tree(stage_id: int):
         WHERE mp.stage_id = ?
     """, (stage_id,))
     manual_pairs = [dict(r) for r in cursor.fetchall()]
+
+    # 4. Get SK Dirjen matched NIKs for this stage
+    cursor.execute("""
+        SELECT DISTINCT vr.no_ktp
+        FROM sk_dirjen_matches m
+        JOIN verified_records vr ON vr.id = m.verified_record_id
+        WHERE m.verified_stage_id = ?
+          AND (m.match_type = 'PERFECT' OR (m.match_type = 'NEEDS_APPROVAL' AND m.override_status = 'APPROVED') OR m.match_type = 'MANUAL_PAIR')
+    """, (stage_id,))
+    sk_nik_set = set(row['no_ktp'].strip() for row in cursor.fetchall() if row['no_ktp'])
     
     conn.close()
     
@@ -1282,48 +1324,67 @@ def get_pengusul_tree(stage_id: int):
         kab = ir["kabupaten_kota"] or "TIDAK DIKETAHUI"
         kec = ir["kecamatan"] or "LAINNYA"
         desa = ir["desa_kelurahan"] or "LAINNYA"
+        nik = (ir["no_ktp"] or "").strip()
         
         if peng not in tree: tree[peng] = {}
         if kab not in tree[peng]: tree[peng][kab] = {}
         if kec not in tree[peng][kab]: tree[peng][kab][kec] = {}
         if desa not in tree[peng][kab][kec]:
-            tree[peng][kab][kec][desa] = {"cpb": 0, "lolos": 0, "tidak_lolos": 0}
+            tree[peng][kab][kec][desa] = {"cpb": 0, "lolos": 0, "tidak_lolos": 0, "sk_dirjen_sudah": 0}
         
         node = tree[peng][kab][kec][desa]
         node["cpb"] += 1
         
-        status = verified_map.get(ir["no_ktp"].strip())
+        status = verified_map.get(nik)
         if status == "LOLOS":
             node["lolos"] += 1
+            if nik in sk_nik_set:
+                node["sk_dirjen_sudah"] += 1
         elif status == "TIDAK LOLOS":
             node["tidak_lolos"] += 1
     
     # Konversi ke format JSON tree
     tree_list = []
     for p_name, kabs in tree.items():
-        p_node = {"name": p_name, "cpb": 0, "lolos": 0, "tidak_lolos": 0, "belum_verifikasi": 0, "children": []}
+        p_node = {"name": p_name, "cpb": 0, "lolos": 0, "tidak_lolos": 0, "belum_verifikasi": 0, "sk_dirjen_sudah": 0, "sk_dirjen_belum": 0, "children": []}
         for kb_name, kecs in kabs.items():
-            kb_node = {"name": kb_name, "cpb": 0, "lolos": 0, "tidak_lolos": 0, "belum_verifikasi": 0, "children": []}
+            kb_node = {"name": kb_name, "cpb": 0, "lolos": 0, "tidak_lolos": 0, "belum_verifikasi": 0, "sk_dirjen_sudah": 0, "sk_dirjen_belum": 0, "children": []}
             for kc_name, desas in kecs.items():
-                kc_node = {"name": kc_name, "cpb": 0, "lolos": 0, "tidak_lolos": 0, "belum_verifikasi": 0, "children": []}
+                kc_node = {"name": kc_name, "cpb": 0, "lolos": 0, "tidak_lolos": 0, "belum_verifikasi": 0, "sk_dirjen_sudah": 0, "sk_dirjen_belum": 0, "children": []}
                 for ds_name, stats in desas.items():
                     ds_belum = stats["cpb"] - stats["lolos"] - stats["tidak_lolos"]
-                    ds_node = {"name": ds_name, "cpb": stats["cpb"], "lolos": stats["lolos"], "tidak_lolos": stats["tidak_lolos"], "belum_verifikasi": ds_belum}
+                    ds_sk_sudah = stats["sk_dirjen_sudah"]
+                    ds_sk_belum = max(0, stats["lolos"] - ds_sk_sudah)
+                    ds_node = {
+                        "name": ds_name, 
+                        "cpb": stats["cpb"], 
+                        "lolos": stats["lolos"], 
+                        "tidak_lolos": stats["tidak_lolos"], 
+                        "belum_verifikasi": ds_belum,
+                        "sk_dirjen_sudah": ds_sk_sudah,
+                        "sk_dirjen_belum": ds_sk_belum
+                    }
                     kc_node["children"].append(ds_node)
                     kc_node["cpb"] += stats["cpb"]
                     kc_node["lolos"] += stats["lolos"]
                     kc_node["tidak_lolos"] += stats["tidak_lolos"]
+                    kc_node["sk_dirjen_sudah"] += ds_sk_sudah
                 kc_node["belum_verifikasi"] = kc_node["cpb"] - kc_node["lolos"] - kc_node["tidak_lolos"]
+                kc_node["sk_dirjen_belum"] = max(0, kc_node["lolos"] - kc_node["sk_dirjen_sudah"])
                 kb_node["children"].append(kc_node)
                 kb_node["cpb"] += kc_node["cpb"]
                 kb_node["lolos"] += kc_node["lolos"]
                 kb_node["tidak_lolos"] += kc_node["tidak_lolos"]
+                kb_node["sk_dirjen_sudah"] += kc_node["sk_dirjen_sudah"]
             kb_node["belum_verifikasi"] = kb_node["cpb"] - kb_node["lolos"] - kb_node["tidak_lolos"]
+            kb_node["sk_dirjen_belum"] = max(0, kb_node["lolos"] - kb_node["sk_dirjen_sudah"])
             p_node["children"].append(kb_node)
             p_node["cpb"] += kb_node["cpb"]
             p_node["lolos"] += kb_node["lolos"]
             p_node["tidak_lolos"] += kb_node["tidak_lolos"]
+            p_node["sk_dirjen_sudah"] += kb_node["sk_dirjen_sudah"]
         p_node["belum_verifikasi"] = p_node["cpb"] - p_node["lolos"] - p_node["tidak_lolos"]
+        p_node["sk_dirjen_belum"] = max(0, p_node["lolos"] - p_node["sk_dirjen_sudah"])
         tree_list.append(p_node)
         
     return tree_list
@@ -2589,7 +2650,7 @@ def export_pengusul_tree(stage_id: int):
     left_align = Alignment(horizontal='left', vertical='center', wrap_text=True)
     
     # Headers
-    headers = ['No', 'Pengusul', 'Kabupaten/Kota', 'Kecamatan', 'Desa/Kelurahan', 'CPB', 'Lolos', 'Tidak Lolos', 'Belum']
+    headers = ['No', 'Pengusul', 'Kabupaten/Kota', 'Kecamatan', 'Desa/Kelurahan', 'CPB', 'Lolos', 'Tidak Lolos', 'Belum', 'Sudah SK Dirjen', 'Belum SK Dirjen']
     for col, h in enumerate(headers, 1):
         cell = ws.cell(row=1, column=col, value=h)
         cell.font = header_font_white
@@ -2609,33 +2670,35 @@ def export_pengusul_tree(stage_id: int):
                 for desa in kec.get('children', []):
                     ds_name = desa['name']
                     values = [counter, p_name, kb_name, kc_name, ds_name,
-                              desa['cpb'], desa['lolos'], desa['tidak_lolos'], desa['belum_verifikasi']]
+                              desa['cpb'], desa['lolos'], desa['tidak_lolos'], desa['belum_verifikasi'],
+                              desa.get('sk_dirjen_sudah', 0), desa.get('sk_dirjen_belum', 0)]
                     for col, val in enumerate(values, 1):
                         cell = ws.cell(row=row_num, column=col, value=val)
                         cell.font = data_font
                         cell.border = thin_border
-                        cell.alignment = center_align if col in (1, 6, 7, 8, 9) else left_align
+                        cell.alignment = center_align if col in (1, 6, 7, 8, 9, 10, 11) else left_align
                     row_num += 1
                     counter += 1
         
         # Add summary row for pengusul
         summary_values = ['', f'TOTAL {p_name}', '', '', '',
-                          pengusul['cpb'], pengusul['lolos'], pengusul['tidak_lolos'], pengusul['belum_verifikasi']]
+                          pengusul['cpb'], pengusul['lolos'], pengusul['tidak_lolos'], pengusul['belum_verifikasi'],
+                          pengusul.get('sk_dirjen_sudah', 0), pengusul.get('sk_dirjen_belum', 0)]
         for col, val in enumerate(summary_values, 1):
             cell = ws.cell(row=row_num, column=col, value=val)
             cell.font = Font(name='Bookman Old Style', size=10, bold=True)
             cell.fill = PatternFill(start_color="D1E7DD", end_color="D1E7DD", fill_type="solid")
             cell.border = thin_border
-            cell.alignment = center_align if col in (1, 6, 7, 8, 9) else left_align
+            cell.alignment = center_align if col in (1, 6, 7, 8, 9, 10, 11) else left_align
         row_num += 1
     
     # Column widths
-    col_widths = [6, 25, 25, 25, 25, 8, 8, 12, 8]
+    col_widths = [6, 25, 25, 25, 25, 8, 8, 12, 8, 15, 15]
     for i, w in enumerate(col_widths, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
     
     # Auto filter
-    ws.auto_filter.ref = f"A1:I{row_num - 1}"
+    ws.auto_filter.ref = f"A1:K{row_num - 1}"
     
     conn.close()
     
@@ -2665,6 +2728,7 @@ def get_kabupaten_pengusul_tree(stage_id: int):
                 kab_map[kb_name] = {
                     "name": kb_name,
                     "cpb": 0, "lolos": 0, "tidak_lolos": 0, "belum_verifikasi": 0,
+                    "sk_dirjen_sudah": 0, "sk_dirjen_belum": 0,
                     "children": []
                 }
             node = kab_map[kb_name]
@@ -2672,12 +2736,16 @@ def get_kabupaten_pengusul_tree(stage_id: int):
             node["lolos"] += kab['lolos']
             node["tidak_lolos"] += kab['tidak_lolos']
             node["belum_verifikasi"] += kab['belum_verifikasi']
+            node["sk_dirjen_sudah"] += kab.get('sk_dirjen_sudah', 0)
+            node["sk_dirjen_belum"] += kab.get('sk_dirjen_belum', 0)
             node["children"].append({
                 "name": p_name,
                 "cpb": kab['cpb'],
                 "lolos": kab['lolos'],
                 "tidak_lolos": kab['tidak_lolos'],
-                "belum_verifikasi": kab['belum_verifikasi']
+                "belum_verifikasi": kab['belum_verifikasi'],
+                "sk_dirjen_sudah": kab.get('sk_dirjen_sudah', 0),
+                "sk_dirjen_belum": kab.get('sk_dirjen_belum', 0)
             })
 
     result = sorted(kab_map.values(), key=lambda x: x['name'])
@@ -3701,6 +3769,8 @@ def global_search(
     desa: str = "",
     status: str = "",
     tahap: str = "",
+    sk_dirjen: str = "ALL",
+    pengusul: str = "",
     record_type: str = "all",
     published_only: int = 1,
     page: int = 1,
@@ -3731,6 +3801,9 @@ def global_search(
     if tahap:
         conditions.append("ist.id = ?")
         params.append(int(tahap))
+    if pengusul:
+        conditions.append("UPPER(COALESCE(ir_p.pengusul, '')) = UPPER(?)")
+        params.append(pengusul)
 
     where_clause = " AND ".join(conditions) if conditions else "1=1"
 
@@ -3740,6 +3813,12 @@ def global_search(
         verified_status_clause = "AND vr.status = 'LOLOS'"
     elif status == "TIDAK_LOLOS":
         verified_status_clause = "AND vr.status = 'TIDAK LOLOS'"
+
+    sk_dirjen_clause = ""
+    if sk_dirjen == "SUDAH":
+        sk_dirjen_clause = "AND sk.has_sk = 1"
+    elif sk_dirjen == "BELUM":
+        sk_dirjen_clause = "AND (sk.has_sk IS NULL OR sk.has_sk = 0)"
 
     published_clause = "AND vb.is_published = 1" if published_only == 1 else ""
 
@@ -3751,12 +3830,29 @@ def global_search(
         query = f"""
             SELECT vr.id, vr.nama, vr.no_ktp, vr.no_kk, vr.kabupaten_kota, vr.kecamatan,
                    vr.desa_kelurahan, vr.status, ist.id as tahap_id, ist.name as tahap_name,
-                   vb.name as batch_name, 'verified' as record_type
+                   vb.name as batch_name, 'verified' as record_type,
+                   CASE WHEN sk.has_sk IS NOT NULL THEN 'SUDAH' ELSE 'BELUM' END as sk_dirjen_status,
+                   sk.nomor_sk,
+                   COALESCE(ir_p.pengusul, 'LAINNYA') as pengusul
             FROM verified_records vr
             JOIN verified_batches vb ON vb.id = vr.batch_id
             JOIN invers_stages ist ON ist.id = vb.stage_id
+            LEFT JOIN (
+                SELECT DISTINCT no_ktp, pengusul
+                FROM invers_records
+                WHERE pengusul IS NOT NULL AND pengusul != ''
+            ) ir_p ON ir_p.no_ktp = vr.no_ktp
+            LEFT JOIN (
+                SELECT DISTINCT m.verified_record_id, 1 as has_sk, b.stage_name as nomor_sk
+                FROM sk_dirjen_matches m
+                JOIN sk_dirjen_records r ON r.id = m.sk_record_id
+                JOIN sk_dirjen_batches b ON b.id = r.batch_id
+                WHERE m.verified_record_id IS NOT NULL
+                  AND (m.match_type = 'PERFECT' OR (m.match_type = 'NEEDS_APPROVAL' AND m.override_status = 'APPROVED') OR m.match_type = 'MANUAL_PAIR')
+            ) sk ON sk.verified_record_id = vr.id
             WHERE {where_clause}
             {verified_status_clause}
+            {sk_dirjen_clause}
             {published_clause}
             ORDER BY vr.nama ASC
         """
@@ -3767,7 +3863,7 @@ def global_search(
             all_records.append(rec)
 
     # --- Invers records (belum diverifikasi) ---
-    if record_type in ("all", "invers"):
+    if record_type in ("all", "invers") and sk_dirjen != "SUDAH":
         invers_conditions = []
         invers_params = []
         if q and len(q.strip()) >= 1:
@@ -3786,6 +3882,9 @@ def global_search(
         if tahap:
             invers_conditions.append("irv.stage_id = ?")
             invers_params.append(int(tahap))
+        if pengusul:
+            invers_conditions.append("UPPER(COALESCE(ir.pengusul, '')) = UPPER(?)")
+            invers_params.append(pengusul)
 
         invers_where = " AND ".join(invers_conditions) if invers_conditions else "1=1"
         published_invers_clause = "AND vb2.is_published = 1" if published_only == 1 else ""
@@ -3793,7 +3892,8 @@ def global_search(
         invers_query = f"""
             SELECT ir.id, ir.nama, ir.no_ktp, ir.no_kk, ir.kabupaten_kota, ir.kecamatan,
                    ir.desa_kelurahan, irv.stage_id as tahap_id, ist.name as tahap_name,
-                   'Belum Diverifikasi' as batch_name, 'invers' as record_type
+                   'Belum Diverifikasi' as batch_name, 'invers' as record_type,
+                   COALESCE(ir.pengusul, 'LAINNYA') as pengusul
             FROM invers_records ir
             JOIN invers_revisions irv ON ir.revision_id = irv.id
             JOIN invers_stages ist ON ist.id = irv.stage_id
@@ -3810,6 +3910,8 @@ def global_search(
         for row in cursor.fetchall():
             rec = dict(row)
             rec['status'] = 'BELUM'
+            rec['sk_dirjen_status'] = 'BELUM'
+            rec['nomor_sk'] = None
             all_records.append(rec)
 
     conn.close()
@@ -3837,6 +3939,7 @@ def global_search(
     all_kabs = sorted(list(set(r['kabupaten_kota'] for r in all_records if r.get('kabupaten_kota'))))
     all_kecs = sorted(list(set(r['kecamatan'] for r in all_records if r.get('kecamatan'))))
     all_desas = sorted(list(set(r['desa_kelurahan'] for r in all_records if r.get('desa_kelurahan'))))
+    all_pengusuls = sorted(list(set(r['pengusul'] for r in all_records if r.get('pengusul'))))
     
     all_tahaps_raw = {}
     for r in all_records:
@@ -3856,7 +3959,8 @@ def global_search(
             "kabupatens": all_kabs,
             "kecamatans": all_kecs,
             "desas": all_desas,
-            "tahaps": all_tahaps
+            "tahaps": all_tahaps,
+            "pengusuls": all_pengusuls
         }
     }
 
@@ -3868,10 +3972,12 @@ def global_search_export(
     desa: str = "",
     status: str = "",
     tahap: str = "",
+    sk_dirjen: str = "ALL",
+    pengusul: str = "",
     record_type: str = "all"
 ):
     result = global_search(q=q, kabupaten=kabupaten, kecamatan=kecamatan, desa=desa,
-                           status=status, tahap=tahap, record_type=record_type,
+                           status=status, tahap=tahap, sk_dirjen=sk_dirjen, pengusul=pengusul, record_type=record_type,
                            page=1, limit=99999, export_all=True)
     records = result["records"]
 
@@ -3879,7 +3985,7 @@ def global_search_export(
     ws = wb.active
     ws.title = "Pencarian Global"
 
-    headers = ["No", "Tahap", "Nama", "NIK", "No KK", "Kabupaten/Kota", "Kecamatan", "Desa/Kelurahan", "Status", "Asal"]
+    headers = ["No", "Tahap", "Nama", "NIK", "No KK", "Kabupaten/Kota", "Kecamatan", "Desa/Kelurahan", "Status", "SK Dirjen", "Nomor SK", "Asal", "Pengusul"]
     header_font = openpyxl.styles.Font(bold=True, color="FFFFFF")
     header_fill = openpyxl.styles.PatternFill(start_color="1A3C40", end_color="1A3C40", fill_type="solid")
     for col_idx, h in enumerate(headers, 1):
@@ -3898,7 +4004,10 @@ def global_search_export(
         ws.cell(row=row_idx, column=7, value=rec.get("kecamatan", ""))
         ws.cell(row=row_idx, column=8, value=rec.get("desa_kelurahan", ""))
         ws.cell(row=row_idx, column=9, value=rec.get("status", ""))
-        ws.cell(row=row_idx, column=10, value="Terverifikasi" if rec["record_type"] == "verified" else "Belum Diverifikasi")
+        ws.cell(row=row_idx, column=10, value=rec.get("sk_dirjen_status", "BELUM"))
+        ws.cell(row=row_idx, column=11, value=rec.get("nomor_sk") or "-")
+        ws.cell(row=row_idx, column=12, value="Terverifikasi" if rec["record_type"] == "verified" else "Belum Diverifikasi")
+        ws.cell(row=row_idx, column=13, value=rec.get("pengusul") or "-")
 
     for col in ws.columns:
         max_len = 0
@@ -3913,7 +4022,7 @@ def global_search_export(
     wb.save(output)
     output.seek(0)
 
-    filename = f"Pencarian_Global_{kabupaten or 'Semua'}_{status or 'Semua'}_{page}.xlsx"
+    filename = f"Pencarian_Global_{kabupaten or 'Semua'}_{status or 'Semua'}_SK_{sk_dirjen}.xlsx"
     return StreamingResponse(
         output,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

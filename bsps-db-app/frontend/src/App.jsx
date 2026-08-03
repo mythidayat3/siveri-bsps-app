@@ -49,7 +49,7 @@ const IconHelp = () => (
 );
 
 // Expandable Kabupaten Row for "Rekap Per Kabupaten" tab
-function KabupatenPengusulRow({ kab }) {
+function KabupatenPengusulRow({ kab, onNavigate }) {
   const [isExpanded, setIsExpanded] = useState(false);
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -57,15 +57,13 @@ function KabupatenPengusulRow({ kab }) {
         className={`tree-row ${isExpanded ? 'active-row' : ''}`}
         style={{ 
           display: 'grid',
-          gridTemplateColumns: 'minmax(200px, 2fr) repeat(5, 90px)',
+          gridTemplateColumns: 'minmax(180px, 2fr) repeat(6, 75px) 65px',
           alignItems: 'center',
           padding: '12px 14px',
-          borderBottom: '1px solid #e9ecef',
-          cursor: 'pointer'
+          borderBottom: '1px solid #e9ecef'
         }}
-        onClick={() => setIsExpanded(!isExpanded)}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }} onClick={() => setIsExpanded(!isExpanded)}>
           <span 
             className={`tree-arrow ${isExpanded ? 'expanded' : ''}`}
             style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px' }}
@@ -74,12 +72,15 @@ function KabupatenPengusulRow({ kab }) {
           </span>
           <span style={{ fontWeight: '700', fontSize: '0.9rem' }}>{kab.name}</span>
         </div>
-        <div style={{ textAlign: 'center', fontWeight: '600', fontSize: '0.85rem' }}>{kab.cpb}</div>
-        <div style={{ textAlign: 'center', fontWeight: '600', fontSize: '0.85rem', color: 'var(--success)' }}>{kab.lolos}</div>
-        <div style={{ textAlign: 'center', fontWeight: '600', fontSize: '0.85rem', color: '#856404' }}>{kab.tidak_lolos}</div>
-        <div style={{ textAlign: 'center', fontWeight: '600', fontSize: '0.85rem', color: 'var(--danger)' }}>{kab.belum_verifikasi}</div>
+        <div style={{ textAlign: 'center' }}><button className="rekap-link" onClick={() => onNavigate && onNavigate({ kab: kab.name })}>{kab.cpb}</button></div>
+        <div style={{ textAlign: 'center' }}><button className="rekap-link" onClick={() => onNavigate && onNavigate({ kab: kab.name, status: 'LOLOS' })} style={{ color: 'var(--success)' }}>{kab.lolos}</button></div>
+        <div style={{ textAlign: 'center' }}><button className="rekap-link" onClick={() => onNavigate && onNavigate({ kab: kab.name, status: 'TIDAK_LOLOS' })} style={{ color: '#856404' }}>{kab.tidak_lolos}</button></div>
+        <div style={{ textAlign: 'center' }}><button className="rekap-link" onClick={() => onNavigate && onNavigate({ kab: kab.name, status: 'BELUM' })} style={{ color: 'var(--danger)' }}>{kab.belum_verifikasi}</button></div>
+        <div style={{ textAlign: 'center' }}><button className="rekap-link" onClick={() => onNavigate && onNavigate({ kab: kab.name, status: 'LOLOS', sk_dirjen: 'SUDAH' })}><span className="sk-dirjen-badge sudah">{kab.sk_dirjen_sudah || '-'}</span></button></div>
+        <div style={{ textAlign: 'center' }}><button className="rekap-link" onClick={() => onNavigate && onNavigate({ kab: kab.name, status: 'LOLOS', sk_dirjen: 'BELUM' })}><span className="sk-dirjen-badge belum">{kab.sk_dirjen_belum || '-'}</span></button></div>
         <div style={{ textAlign: 'center' }}>
           <span 
+            onClick={() => setIsExpanded(!isExpanded)}
             style={{ 
               cursor: 'pointer', fontSize: '0.75rem', color: 'var(--primary)',
               fontWeight: '600', padding: '2px 8px', borderRadius: '4px',
@@ -97,7 +98,7 @@ function KabupatenPengusulRow({ kab }) {
               key={idx}
               style={{ 
                 display: 'grid',
-                gridTemplateColumns: 'minmax(200px, 2fr) repeat(5, 90px)',
+                gridTemplateColumns: 'minmax(180px, 2fr) repeat(6, 75px) 65px',
                 alignItems: 'center',
                 padding: '10px 14px',
                 borderBottom: '1px dashed #e9ecef',
@@ -108,10 +109,12 @@ function KabupatenPengusulRow({ kab }) {
                 <span style={{ borderLeft: '2px dashed #dee2e6', marginLeft: '9px', height: '100%', display: 'inline-block' }}></span>
                 <span style={{ fontWeight: '500', fontSize: '0.85rem' }}>{pengusul.name}</span>
               </div>
-              <div style={{ textAlign: 'center', fontWeight: '600', fontSize: '0.85rem' }}>{pengusul.cpb}</div>
-              <div style={{ textAlign: 'center', fontWeight: '600', fontSize: '0.85rem', color: 'var(--success)' }}>{pengusul.lolos}</div>
-              <div style={{ textAlign: 'center', fontWeight: '600', fontSize: '0.85rem', color: '#856404' }}>{pengusul.tidak_lolos}</div>
-              <div style={{ textAlign: 'center', fontWeight: '600', fontSize: '0.85rem', color: 'var(--danger)' }}>{pengusul.belum_verifikasi}</div>
+              <div style={{ textAlign: 'center' }}><button className="rekap-link" onClick={() => onNavigate && onNavigate({ kab: kab.name, pengusul: pengusul.name })}>{pengusul.cpb}</button></div>
+              <div style={{ textAlign: 'center' }}><button className="rekap-link" onClick={() => onNavigate && onNavigate({ kab: kab.name, pengusul: pengusul.name, status: 'LOLOS' })} style={{ color: 'var(--success)' }}>{pengusul.lolos}</button></div>
+              <div style={{ textAlign: 'center' }}><button className="rekap-link" onClick={() => onNavigate && onNavigate({ kab: kab.name, pengusul: pengusul.name, status: 'TIDAK_LOLOS' })} style={{ color: '#856404' }}>{pengusul.tidak_lolos}</button></div>
+              <div style={{ textAlign: 'center' }}><button className="rekap-link" onClick={() => onNavigate && onNavigate({ kab: kab.name, pengusul: pengusul.name, status: 'BELUM' })} style={{ color: 'var(--danger)' }}>{pengusul.belum_verifikasi}</button></div>
+              <div style={{ textAlign: 'center' }}><button className="rekap-link" onClick={() => onNavigate && onNavigate({ kab: kab.name, pengusul: pengusul.name, status: 'LOLOS', sk_dirjen: 'SUDAH' })}><span className="sk-dirjen-badge sudah">{pengusul.sk_dirjen_sudah || '-'}</span></button></div>
+              <div style={{ textAlign: 'center' }}><button className="rekap-link" onClick={() => onNavigate && onNavigate({ kab: kab.name, pengusul: pengusul.name, status: 'LOLOS', sk_dirjen: 'BELUM' })}><span className="sk-dirjen-badge belum">{pengusul.sk_dirjen_belum || '-'}</span></button></div>
               <div></div>
             </div>
           ))}
@@ -126,10 +129,24 @@ function KabupatenPengusulRow({ kab }) {
   );
 }
 
-// Recursive Tree Node Component for Pengusul Center (Table-like)
-function TreeNode({ node, level = 0, columns = 5 }) {
+const DISQUALIFY_REASONS = [
+  { code: '1', label: '1. Belum memiliki KK sendiri' },
+  { code: '2', label: '2. Tanah bersengketa' },
+  { code: '3', label: '3. Rumah dalam kondisi layak' },
+  { code: '4', label: '4. Memiliki rumah lebih dari 1' },
+  { code: '5', label: '5. Pernah memperoleh bantuan dari APBN/APBD/CSR/anggaran lainnya' },
+  { code: '6', label: '6. Penghasilan lebih dari UMP' },
+  { code: '7', label: '7. Memilih untuk dibantu dengan sumber anggaran lain' },
+  { code: '8', label: '8. Menghuni kurang dari 3 tahun' },
+  { code: '9', label: '9. Lainnya (diisi pada kolom keterangan)' }
+];
+
+// Simple Toast Notification Component for Pengusul Center (Table-like)
+function TreeNode({ node, level = 0, columns = 7, onNavigate, parentPengusul }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const hasChildren = node.children && node.children.length > 0;
+  const pengusulName = level === 0 ? node.name : parentPengusul;
+  const kabName = level === 1 ? node.name : undefined;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -138,7 +155,7 @@ function TreeNode({ node, level = 0, columns = 5 }) {
         style={{ 
           paddingLeft: `${14 + level * 20}px`,
           display: 'grid',
-          gridTemplateColumns: `minmax(200px, 2fr) repeat(${columns}, 90px)`,
+          gridTemplateColumns: 'minmax(180px, 2fr) repeat(6, 75px) 65px',
           alignItems: 'center',
           gap: '0',
           borderBottom: '1px solid #e9ecef'
@@ -158,10 +175,12 @@ function TreeNode({ node, level = 0, columns = 5 }) {
           )}
           <span style={{ fontWeight: level === 0 ? '700' : level === 1 ? '600' : '500', fontSize: level === 0 ? '0.9rem' : '0.85rem' }}>{node.name}</span>
         </div>
-        <div style={{ textAlign: 'center', fontWeight: '600', fontSize: '0.85rem' }}>{node.cpb}</div>
-        <div style={{ textAlign: 'center', fontWeight: '600', fontSize: '0.85rem', color: 'var(--success)' }}>{node.lolos}</div>
-        <div style={{ textAlign: 'center', fontWeight: '600', fontSize: '0.85rem', color: '#856404' }}>{node.tidak_lolos}</div>
-        <div style={{ textAlign: 'center', fontWeight: '600', fontSize: '0.85rem', color: 'var(--danger)' }}>{node.belum_verifikasi}</div>
+        <div style={{ textAlign: 'center' }}><button className="rekap-link" onClick={() => onNavigate && onNavigate({ kab: kabName, pengusul: pengusulName })}>{node.cpb}</button></div>
+        <div style={{ textAlign: 'center' }}><button className="rekap-link" onClick={() => onNavigate && onNavigate({ kab: kabName, pengusul: pengusulName, status: 'LOLOS' })} style={{ color: 'var(--success)' }}>{node.lolos}</button></div>
+        <div style={{ textAlign: 'center' }}><button className="rekap-link" onClick={() => onNavigate && onNavigate({ kab: kabName, pengusul: pengusulName, status: 'TIDAK_LOLOS' })} style={{ color: '#856404' }}>{node.tidak_lolos}</button></div>
+        <div style={{ textAlign: 'center' }}><button className="rekap-link" onClick={() => onNavigate && onNavigate({ kab: kabName, pengusul: pengusulName, status: 'BELUM' })} style={{ color: 'var(--danger)' }}>{node.belum_verifikasi}</button></div>
+        <div style={{ textAlign: 'center' }}><button className="rekap-link" onClick={() => onNavigate && onNavigate({ kab: kabName, pengusul: pengusulName, status: 'LOLOS', sk_dirjen: 'SUDAH' })}><span className="sk-dirjen-badge sudah">{node.sk_dirjen_sudah || '-'}</span></button></div>
+        <div style={{ textAlign: 'center' }}><button className="rekap-link" onClick={() => onNavigate && onNavigate({ kab: kabName, pengusul: pengusulName, status: 'LOLOS', sk_dirjen: 'BELUM' })}><span className="sk-dirjen-badge belum">{node.sk_dirjen_belum || '-'}</span></button></div>
         <div style={{ textAlign: 'center' }}>
           {hasChildren && (
             <span 
@@ -184,7 +203,7 @@ function TreeNode({ node, level = 0, columns = 5 }) {
       {hasChildren && isExpanded && (
         <div className="tree-children" style={{ marginLeft: `${level === 0 ? 12 : 20}px` }}>
           {node.children.map((child, idx) => (
-            <TreeNode key={idx} node={child} level={level + 1} columns={columns} />
+            <TreeNode key={idx} node={child} level={level + 1} columns={columns} onNavigate={onNavigate} parentPengusul={pengusulName} />
           ))}
         </div>
       )}
@@ -313,7 +332,20 @@ function App() {
     }
   };
 
-  const handleUpdateRecordStatus = async (recordId, newStatus) => {
+  const handleUpdateRecordStatus = async (recordId, newStatus, recordObj = null) => {
+    if (newStatus === 'TIDAK LOLOS') {
+      let rec = recordObj;
+      if (!rec && stageVerifiedData) {
+        rec = stageVerifiedData.find(r => r.id === recordId);
+      }
+      if (!rec) rec = { id: recordId, nama: 'CPB', no_ktp: '' };
+
+      setDisqualifyReason(rec.alasan_tidak_lolos || '1');
+      setDisqualifyKeterangan(rec.keterangan || '');
+      setDisqualifyModalRecord(rec);
+      return;
+    }
+
     try {
       const res = await fetch(`${BACKEND_URL}/api/verified/record/${recordId}/update-status`, {
         method: 'POST',
@@ -333,6 +365,42 @@ function App() {
       }
     } catch (err) {
       showToast(err.message || 'Terjadi kesalahan saat mengubah status CPB', 'error');
+    }
+  };
+
+  const handleConfirmDisqualify = async () => {
+    if (!disqualifyModalRecord) return;
+    if (disqualifyReason === '9' && !disqualifyKeterangan.trim()) {
+      showToast('Keterangan wajib diisi apabila memilih opsi 9. Lainnya', 'error');
+      return;
+    }
+    setDisqualifySubmitting(true);
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/verified/record/${disqualifyModalRecord.id}/update-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: 'TIDAK LOLOS',
+          alasan_tidak_lolos: disqualifyReason,
+          keterangan: disqualifyKeterangan.trim()
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast(data.message || 'Status CPB berhasil diubah menjadi TIDAK LOLOS', 'success');
+        setDisqualifyModalRecord(null);
+        if (selectedStageId) {
+          fetchStageData(selectedStageId);
+        }
+        if (typeof fetchRekapBatchBA === 'function') fetchRekapBatchBA();
+        if (typeof fetchOverviewCenter === 'function') fetchOverviewCenter();
+      } else {
+        showToast(data.detail || 'Gagal menyimpan alasan tidak lolos', 'error');
+      }
+    } catch (err) {
+      showToast(err.message || 'Terjadi kesalahan saat menyimpan data', 'error');
+    } finally {
+      setDisqualifySubmitting(false);
     }
   };
 
@@ -518,6 +586,12 @@ function App() {
   const [rekapBatchData, setRekapBatchData] = useState(null);
   const [rekapBatchLoading, setRekapBatchLoading] = useState(false);
 
+  // State Disqualify Modal (Input Alasan Tidak Lolos)
+  const [disqualifyModalRecord, setDisqualifyModalRecord] = useState(null);
+  const [disqualifyReason, setDisqualifyReason] = useState('1');
+  const [disqualifyKeterangan, setDisqualifyKeterangan] = useState('');
+  const [disqualifySubmitting, setDisqualifySubmitting] = useState(false);
+
   // State Pencarian Global
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
   const [globalFilterKab, setGlobalFilterKab] = useState('ALL');
@@ -525,10 +599,23 @@ function App() {
   const [globalFilterDesa, setGlobalFilterDesa] = useState('ALL');
   const [globalFilterStatus, setGlobalFilterStatus] = useState('ALL');
   const [globalFilterTahap, setGlobalFilterTahap] = useState('ALL');
+  const [globalFilterSkDirjen, setGlobalFilterSkDirjen] = useState('ALL');
+  const [globalFilterPengusul, setGlobalFilterPengusul] = useState('ALL');
   const [globalFilterType, setGlobalFilterType] = useState('all');
   const [globalPage, setGlobalPage] = useState(1);
   const [globalData, setGlobalData] = useState(null);
   const [globalLoading, setGlobalLoading] = useState(false);
+
+  const navigateToGlobalSearch = ({ kab, tahap, sk_dirjen, status, pengusul } = {}) => {
+    setGlobalFilterKab(kab || 'ALL');
+    setGlobalFilterKec('ALL');
+    setGlobalFilterDesa('ALL');
+    setGlobalFilterTahap(tahap ? String(tahap) : 'ALL');
+    setGlobalFilterSkDirjen(sk_dirjen || 'ALL');
+    setGlobalFilterPengusul(pengusul || 'ALL');
+    if (status) setGlobalFilterStatus(status);
+    setActiveTab('global-search');
+  };
 
   // State Bulk Operations
   const [selectedRecordIds, setSelectedRecordIds] = useState(new Set());
@@ -906,6 +993,8 @@ function App() {
       if (globalFilterDesa !== 'ALL') params.set('desa', globalFilterDesa);
       if (globalFilterStatus !== 'ALL') params.set('status', globalFilterStatus);
       if (globalFilterTahap !== 'ALL') params.set('tahap', globalFilterTahap);
+      if (globalFilterSkDirjen !== 'ALL') params.set('sk_dirjen', globalFilterSkDirjen);
+      if (globalFilterPengusul !== 'ALL') params.set('pengusul', globalFilterPengusul);
       if (globalFilterType !== 'all') params.set('record_type', globalFilterType);
       params.set('published_only', activeTab === 'rekap-unggahan' ? '0' : '1');
       params.set('page', overridePage || globalPage);
@@ -920,7 +1009,7 @@ function App() {
       setGlobalLoading(false);
     }
   }, [globalSearchQuery, globalFilterKab, globalFilterKec, globalFilterDesa,
-      globalFilterStatus, globalFilterTahap, globalFilterType, globalPage]);
+      globalFilterStatus, globalFilterTahap, globalFilterSkDirjen, globalFilterPengusul, globalFilterType, globalPage]);
 
   // Debounced search for global search input
   useEffect(() => {
@@ -939,7 +1028,7 @@ function App() {
       setGlobalPage(1);
       fetchGlobalSearch(1);
     }
-  }, [globalFilterKab, globalFilterKec, globalFilterDesa, globalFilterStatus, globalFilterTahap, globalFilterType]);
+  }, [globalFilterKab, globalFilterKec, globalFilterDesa, globalFilterStatus, globalFilterTahap, globalFilterSkDirjen, globalFilterPengusul, globalFilterType]);
 
   // Fetch when page changes (pagination)
   useEffect(() => {
@@ -3530,7 +3619,7 @@ function App() {
                         {isAdmin ? (
                           <select
                             value={r.status}
-                            onChange={(e) => handleUpdateRecordStatus(r.id, e.target.value)}
+                            onChange={(e) => handleUpdateRecordStatus(r.id, e.target.value, r)}
                             style={{
                               padding: '3px 8px',
                               borderRadius: '4px',
@@ -3682,25 +3771,29 @@ function App() {
                       <thead>
                         <tr>
                           <th>Kabupaten / Kota</th>
-                          <th>Total CPB Awal</th>
-                          <th>Terverifikasi Lolos</th>
-                          <th>Tidak Lolos</th>
-                          <th>Belum Terverifikasi</th>
+                          <th style={{ textAlign: 'center' }}>Total CPB Awal</th>
+                          <th style={{ textAlign: 'center' }}>Terverifikasi Lolos</th>
+                          <th style={{ textAlign: 'center' }}>Tidak Lolos</th>
+                          <th style={{ textAlign: 'center' }}>Belum Terverifikasi</th>
+                          <th style={{ textAlign: 'center' }}>Sudah SK Dirjen</th>
+                          <th style={{ textAlign: 'center' }}>Belum SK Dirjen</th>
                         </tr>
                       </thead>
                       <tbody>
                         {overviewTables?.kabupaten?.map((k, idx) => (
                           <tr key={idx}>
                             <td style={{ fontWeight: '600' }}>{k.name}</td>
-                            <td>{k.total_cpb} unit</td>
-                            <td style={{ color: 'var(--success)', fontWeight: '600' }}>{k.lolos} unit</td>
-                            <td style={{ color: '#856404', fontWeight: '600' }}>{k.tidak_lolos} unit</td>
-                            <td style={{ color: 'var(--danger)', fontWeight: '600' }}>{k.belum_verifikasi} unit</td>
+                            <td style={{ textAlign: 'center' }}><button className="rekap-link" onClick={() => navigateToGlobalSearch({ kab: k.name, tahap: selectedStageId })}>{k.total_cpb} unit</button></td>
+                            <td style={{ textAlign: 'center', color: 'var(--success)', fontWeight: '600' }}><button className="rekap-link" onClick={() => navigateToGlobalSearch({ kab: k.name, status: 'LOLOS', tahap: selectedStageId })} style={{ color: 'var(--success)' }}>{k.lolos} unit</button></td>
+                            <td style={{ textAlign: 'center', color: '#856404', fontWeight: '600' }}><button className="rekap-link" onClick={() => navigateToGlobalSearch({ kab: k.name, status: 'TIDAK_LOLOS', tahap: selectedStageId })} style={{ color: '#856404' }}>{k.tidak_lolos} unit</button></td>
+                            <td style={{ textAlign: 'center', color: 'var(--danger)', fontWeight: '600' }}><button className="rekap-link" onClick={() => navigateToGlobalSearch({ kab: k.name, status: 'BELUM', tahap: selectedStageId })} style={{ color: 'var(--danger)' }}>{k.belum_verifikasi} unit</button></td>
+                            <td style={{ textAlign: 'center' }}><button className="rekap-link" onClick={() => navigateToGlobalSearch({ kab: k.name, status: 'LOLOS', sk_dirjen: 'SUDAH', tahap: selectedStageId })}><span className="sk-dirjen-badge sudah">{k.sk_dirjen_sudah || '-'}</span></button></td>
+                            <td style={{ textAlign: 'center' }}><button className="rekap-link" onClick={() => navigateToGlobalSearch({ kab: k.name, status: 'LOLOS', sk_dirjen: 'BELUM', tahap: selectedStageId })}><span className="sk-dirjen-badge belum">{k.sk_dirjen_belum || '-'}</span></button></td>
                           </tr>
                         ))}
                         {!overviewTables?.kabupaten?.length && (
                           <tr>
-                            <td colSpan="5" style={{ textAlign: 'center', padding: '16px' }}>Belum ada data wilayah teragregasi.</td>
+                            <td colSpan="7" style={{ textAlign: 'center', padding: '16px' }}>Belum ada data wilayah teragregasi.</td>
                           </tr>
                         )}
                       </tbody>
@@ -3716,25 +3809,29 @@ function App() {
                       <thead>
                         <tr>
                           <th>Kecamatan</th>
-                          <th>Total CPB Awal</th>
-                          <th>Terverifikasi Lolos</th>
-                          <th>Tidak Lolos</th>
-                          <th>Belum Terverifikasi</th>
+                          <th style={{ textAlign: 'center' }}>Total CPB Awal</th>
+                          <th style={{ textAlign: 'center' }}>Terverifikasi Lolos</th>
+                          <th style={{ textAlign: 'center' }}>Tidak Lolos</th>
+                          <th style={{ textAlign: 'center' }}>Belum Terverifikasi</th>
+                          <th style={{ textAlign: 'center' }}>Sudah SK Dirjen</th>
+                          <th style={{ textAlign: 'center' }}>Belum SK Dirjen</th>
                         </tr>
                       </thead>
                       <tbody>
                         {overviewTables?.kecamatan?.map((kc, idx) => (
                           <tr key={idx}>
                             <td style={{ fontWeight: '600' }}>{kc.name}</td>
-                            <td>{kc.total_cpb} unit</td>
-                            <td style={{ color: 'var(--success)', fontWeight: '600' }}>{kc.lolos} unit</td>
-                            <td style={{ color: '#856404', fontWeight: '600' }}>{kc.tidak_lolos} unit</td>
-                            <td style={{ color: 'var(--danger)', fontWeight: '600' }}>{kc.belum_verifikasi} unit</td>
+                            <td style={{ textAlign: 'center' }}><button className="rekap-link" onClick={() => navigateToGlobalSearch({ tahap: selectedStageId })}>{kc.total_cpb} unit</button></td>
+                            <td style={{ textAlign: 'center', color: 'var(--success)', fontWeight: '600' }}><button className="rekap-link" onClick={() => navigateToGlobalSearch({ status: 'LOLOS', tahap: selectedStageId })} style={{ color: 'var(--success)' }}>{kc.lolos} unit</button></td>
+                            <td style={{ textAlign: 'center', color: '#856404', fontWeight: '600' }}><button className="rekap-link" onClick={() => navigateToGlobalSearch({ status: 'TIDAK_LOLOS', tahap: selectedStageId })} style={{ color: '#856404' }}>{kc.tidak_lolos} unit</button></td>
+                            <td style={{ textAlign: 'center', color: 'var(--danger)', fontWeight: '600' }}><button className="rekap-link" onClick={() => navigateToGlobalSearch({ status: 'BELUM', tahap: selectedStageId })} style={{ color: 'var(--danger)' }}>{kc.belum_verifikasi} unit</button></td>
+                            <td style={{ textAlign: 'center' }}><button className="rekap-link" onClick={() => navigateToGlobalSearch({ status: 'LOLOS', sk_dirjen: 'SUDAH', tahap: selectedStageId })}><span className="sk-dirjen-badge sudah">{kc.sk_dirjen_sudah || '-'}</span></button></td>
+                            <td style={{ textAlign: 'center' }}><button className="rekap-link" onClick={() => navigateToGlobalSearch({ status: 'LOLOS', sk_dirjen: 'BELUM', tahap: selectedStageId })}><span className="sk-dirjen-badge belum">{kc.sk_dirjen_belum || '-'}</span></button></td>
                           </tr>
                         ))}
                         {!overviewTables?.kecamatan?.length && (
                           <tr>
-                            <td colSpan="5" style={{ textAlign: 'center', padding: '16px' }}>Belum ada data kecamatan teragregasi.</td>
+                            <td colSpan="7" style={{ textAlign: 'center', padding: '16px' }}>Belum ada data kecamatan teragregasi.</td>
                           </tr>
                         )}
                       </tbody>
@@ -3777,7 +3874,7 @@ function App() {
                   {/* Table Header */}
                   <div style={{ 
                     display: 'grid', 
-                    gridTemplateColumns: 'minmax(200px, 2fr) repeat(5, 90px)',
+                    gridTemplateColumns: 'minmax(180px, 2fr) repeat(6, 75px) 65px',
                     alignItems: 'center',
                     padding: '12px 14px',
                     backgroundColor: 'var(--primary)',
@@ -3794,12 +3891,18 @@ function App() {
                     <div style={{ textAlign: 'center' }}>Lolos</div>
                     <div style={{ textAlign: 'center' }}>Tidak Lolos</div>
                     <div style={{ textAlign: 'center' }}>Belum</div>
+                    <div style={{ textAlign: 'center' }}>Sudah SK</div>
+                    <div style={{ textAlign: 'center' }}>Belum SK</div>
                     <div style={{ textAlign: 'center' }}>Aksi</div>
                   </div>
                   
                   {/* Tree Rows */}
                   {getFilteredPengusulTree().map((node, idx) => (
-                    <TreeNode key={idx} node={node} />
+                    <TreeNode 
+                      key={idx} 
+                      node={node} 
+                      onNavigate={(opts) => navigateToGlobalSearch({ tahap: selectedStageId, ...opts })}
+                    />
                   ))}
                   {getFilteredPengusulTree().length === 0 && (
                     <div style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
@@ -3823,7 +3926,7 @@ function App() {
                   {/* Table Header */}
                   <div style={{ 
                     display: 'grid', 
-                    gridTemplateColumns: 'minmax(200px, 2fr) repeat(5, 90px)',
+                    gridTemplateColumns: 'minmax(180px, 2fr) repeat(6, 75px) 65px',
                     alignItems: 'center',
                     padding: '12px 14px',
                     backgroundColor: 'var(--primary)',
@@ -3840,12 +3943,18 @@ function App() {
                     <div style={{ textAlign: 'center' }}>Lolos</div>
                     <div style={{ textAlign: 'center' }}>Tidak Lolos</div>
                     <div style={{ textAlign: 'center' }}>Belum</div>
+                    <div style={{ textAlign: 'center' }}>Sudah SK</div>
+                    <div style={{ textAlign: 'center' }}>Belum SK</div>
                     <div style={{ textAlign: 'center' }}>Aksi</div>
                   </div>
 
                   {/* Kabupaten Rows */}
                   {kabPengusulTree.map((kab, idx) => (
-                    <KabupatenPengusulRow key={idx} kab={kab} />
+                    <KabupatenPengusulRow 
+                      key={idx} 
+                      kab={kab} 
+                      onNavigate={(opts) => navigateToGlobalSearch({ tahap: selectedStageId, ...opts })}
+                    />
                   ))}
                   {kabPengusulTree.length === 0 && (
                     <div style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
@@ -5198,6 +5307,15 @@ function App() {
                 <option value="ALL">Semua Tahap</option>
                 {globalData?.filters?.tahaps?.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
+              <select className="global-filter-select" value={globalFilterSkDirjen} onChange={(e) => setGlobalFilterSkDirjen(e.target.value)}>
+                <option value="ALL">Semua SK Dirjen</option>
+                <option value="SUDAH">Sudah Terbit SK Dirjen</option>
+                <option value="BELUM">Belum Terbit SK Dirjen</option>
+              </select>
+              <select className="global-filter-select" value={globalFilterPengusul} onChange={(e) => setGlobalFilterPengusul(e.target.value)}>
+                <option value="ALL">Semua Pengusul</option>
+                {globalData?.filters?.pengusuls?.map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
               <button
                 className="btn btn-primary"
                 style={{ whiteSpace: 'nowrap' }}
@@ -5210,6 +5328,8 @@ function App() {
                     if (globalFilterDesa !== 'ALL') params.set('desa', globalFilterDesa);
                     if (globalFilterStatus !== 'ALL') params.set('status', globalFilterStatus);
                     if (globalFilterTahap !== 'ALL') params.set('tahap', globalFilterTahap);
+                    if (globalFilterSkDirjen !== 'ALL') params.set('sk_dirjen', globalFilterSkDirjen);
+                    if (globalFilterPengusul !== 'ALL') params.set('pengusul', globalFilterPengusul);
                     if (globalFilterType !== 'all') params.set('record_type', globalFilterType);
                     const res = await fetch(`${BACKEND_URL}/api/global-search/export?${params}`);
                     if (!res.ok) throw new Error("Gagal export");
@@ -5248,8 +5368,10 @@ function App() {
                       <th>No KK</th>
                       <th>Kabupaten</th>
                       <th>Desa</th>
-                      <th style={{ width: '130px' }}>Status</th>
+                      <th style={{ width: '120px' }}>Status</th>
+                      <th style={{ width: '130px' }}>SK Dirjen</th>
                       <th style={{ width: '130px' }}>Asal</th>
+                      <th style={{ width: '150px' }}>Pengusul</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -5271,9 +5393,17 @@ function App() {
                           </span>
                         </td>
                         <td>
+                          <span className={`sk-dirjen-badge ${rec.sk_dirjen_status === 'SUDAH' ? 'sudah' : 'belum'}`} title={rec.nomor_sk || ''}>
+                            {rec.sk_dirjen_status === 'SUDAH' ? (rec.nomor_sk ? `SUDAH (${rec.nomor_sk})` : 'SUDAH') : 'BELUM'}
+                          </span>
+                        </td>
+                        <td>
                           <span className={`asal-badge ${rec.record_type === 'verified' ? 'asal-verified' : 'asal-invers'}`}>
                             {rec.record_type === 'verified' ? 'Terverifikasi' : 'Belum Diverifikasi'}
                           </span>
+                        </td>
+                        <td>
+                          <span style={{ fontSize: '0.85rem', fontWeight: '500' }}>{rec.pengusul || '-'}</span>
                         </td>
                       </tr>
                     ))}
@@ -5375,7 +5505,7 @@ function App() {
                           <tr>
                             <th className="rekap-corner-cell" rowSpan="2" style={{ width: '32px', minWidth: '32px', maxWidth: '32px', left: 0 }}>No</th>
                             <th className="rekap-corner-cell" rowSpan="2" style={{ width: '155px', minWidth: '155px', maxWidth: '155px', left: '32px', textAlign: 'left', borderRight: '2px solid #bfc6d0' }}>Kabupaten / Kota</th>
-                            <th colSpan="7" className="rekap-corner-cell rekap-total-group-th" style={{ left: '187px', width: '382px', minWidth: '382px', maxWidth: '382px', borderRight: '3px solid #64748b' }}>
+                            <th colSpan="7" className="rekap-corner-cell rekap-total-group-th" style={{ left: '187px', width: '413px', minWidth: '413px', maxWidth: '413px', borderRight: '3px solid #64748b' }}>
                               REKAP TOTAL
                             </th>
                             {groupStages.map(stage => {
@@ -5385,7 +5515,7 @@ function App() {
                               const pctTidakLolos = ((t.tidak_lolos / totalBase) * 100).toFixed(1);
                               const pctBelum = ((t.belum_verifikasi / totalBase) * 100).toFixed(1);
                               return (
-                                <th key={stage.stage_id} colSpan="7" className="rekap-stage-th" style={{ width: '354px', minWidth: '354px', maxWidth: '354px' }}>
+                                <th key={stage.stage_id} colSpan="7" className="rekap-stage-th" style={{ width: '413px', minWidth: '413px', maxWidth: '413px' }}>
                                   <div className="rekap-header-progress-container" style={{ marginBottom: '5px' }}>
                                     <div className="rekap-progress-bar-mini" title={`${stage.stage_name} — Lolos: ${pctLolos}%, Tidak Lolos: ${pctTidakLolos}%, Belum: ${pctBelum}%`}>
                                       <div className="rekap-progress-segment rekap-seg-lolos" style={{ width: `${pctLolos}%`, height: '100%' }}></div>
@@ -5399,20 +5529,20 @@ function App() {
                             })}
                           </tr>
                           <tr>
-                            <th className="rekap-sub-th rekap-sub-total-sticky" style={{ left: '187px', width: '54px', minWidth: '54px', maxWidth: '54px' }}>ALOKASI</th>
-                            <th className="rekap-sub-th rekap-sub-total-sticky" style={{ left: '241px', width: '58px', minWidth: '58px', maxWidth: '58px' }}>VERIFIKASI</th>
-                            <th className="rekap-sub-th rekap-sub-lolos rekap-sub-total-sticky" style={{ left: '299px', width: '50px', minWidth: '50px', maxWidth: '50px' }}>LOLOS</th>
-                            <th className="rekap-sub-th rekap-sub-tidak rekap-sub-total-sticky" style={{ left: '349px', width: '60px', minWidth: '60px', maxWidth: '60px' }}>TIDAK LOLOS</th>
-                            <th className="rekap-sub-th rekap-sub-belum rekap-sub-total-sticky" style={{ left: '409px', width: '50px', minWidth: '50px', maxWidth: '50px' }}>BELUM</th>
-                            <th className="rekap-sub-th rekap-sub-skdirjen-sudah rekap-sub-total-sticky" style={{ left: '459px', width: '55px', minWidth: '55px', maxWidth: '55px' }}>SUDAH</th>
-                            <th className="rekap-sub-th rekap-sub-skdirjen-belum rekap-sub-total-sticky" style={{ left: '514px', width: '55px', minWidth: '55px', maxWidth: '55px', borderRight: '3px solid #64748b' }}>BELUM</th>
+                            <th className="rekap-sub-th rekap-sub-total-sticky" style={{ left: '187px', width: '58px', minWidth: '58px', maxWidth: '58px' }}>ALOKASI</th>
+                            <th className="rekap-sub-th rekap-sub-total-sticky" style={{ left: '245px', width: '68px', minWidth: '68px', maxWidth: '68px' }}>VERIFIKASI</th>
+                            <th className="rekap-sub-th rekap-sub-lolos rekap-sub-total-sticky" style={{ left: '313px', width: '52px', minWidth: '52px', maxWidth: '52px' }}>LOLOS</th>
+                            <th className="rekap-sub-th rekap-sub-tidak rekap-sub-total-sticky" style={{ left: '365px', width: '75px', minWidth: '75px', maxWidth: '75px' }}>TIDAK LOLOS</th>
+                            <th className="rekap-sub-th rekap-sub-belum rekap-sub-total-sticky" style={{ left: '440px', width: '52px', minWidth: '52px', maxWidth: '52px' }}>BELUM</th>
+                            <th className="rekap-sub-th rekap-sub-skdirjen-sudah rekap-sub-total-sticky" style={{ left: '492px', width: '54px', minWidth: '54px', maxWidth: '54px' }}>SUDAH</th>
+                            <th className="rekap-sub-th rekap-sub-skdirjen-belum rekap-sub-total-sticky" style={{ left: '546px', width: '54px', minWidth: '54px', maxWidth: '54px', borderRight: '3px solid #64748b' }}>BELUM</th>
                             {groupStages.map(stage => (
                               <React.Fragment key={stage.stage_id}>
-                                <th className="rekap-sub-th" style={{ width: '48px', minWidth: '48px', maxWidth: '48px' }}>ALOKASI</th>
-                                <th className="rekap-sub-th" style={{ width: '52px', minWidth: '52px', maxWidth: '52px' }}>VERIFIKASI</th>
-                                <th className="rekap-sub-th rekap-sub-lolos" style={{ width: '46px', minWidth: '46px', maxWidth: '46px' }}>LOLOS</th>
-                                <th className="rekap-sub-th rekap-sub-tidak" style={{ width: '54px', minWidth: '54px', maxWidth: '54px' }}>TIDAK LOLOS</th>
-                                <th className="rekap-sub-th rekap-sub-belum" style={{ width: '46px', minWidth: '46px', maxWidth: '46px' }}>BELUM</th>
+                                <th className="rekap-sub-th" style={{ width: '58px', minWidth: '58px', maxWidth: '58px' }}>ALOKASI</th>
+                                <th className="rekap-sub-th" style={{ width: '68px', minWidth: '68px', maxWidth: '68px' }}>VERIFIKASI</th>
+                                <th className="rekap-sub-th rekap-sub-lolos" style={{ width: '52px', minWidth: '52px', maxWidth: '52px' }}>LOLOS</th>
+                                <th className="rekap-sub-th rekap-sub-tidak" style={{ width: '75px', minWidth: '75px', maxWidth: '75px' }}>TIDAK LOLOS</th>
+                                <th className="rekap-sub-th rekap-sub-belum" style={{ width: '52px', minWidth: '52px', maxWidth: '52px' }}>BELUM</th>
                                 <th className="rekap-sub-th rekap-sub-skdirjen-sudah" style={{ width: '54px', minWidth: '54px', maxWidth: '54px' }}>SUDAH</th>
                                 <th className="rekap-sub-th rekap-sub-skdirjen-belum" style={{ width: '54px', minWidth: '54px', maxWidth: '54px', borderRight: '2px solid #dee2e6' }}>BELUM</th>
                               </React.Fragment>
@@ -5442,13 +5572,13 @@ function App() {
                               <tr key={kabIdx} className={!hasAnyData ? 'rekap-row-empty' : ''}>
                                 <td className="rekap-frozen-no" style={{ width: '32px', minWidth: '32px', maxWidth: '32px', left: 0 }}>{kabIdx + 1}</td>
                                 <td className="rekap-frozen-kab" style={{ width: '155px', minWidth: '155px', maxWidth: '155px', left: '32px', whiteSpace: 'normal', wordBreak: 'break-word' }}>{kab}</td>
-                                <td className="rekap-frozen-total" style={{ left: '187px', width: '54px', minWidth: '54px', maxWidth: '54px' }}><button className="rekap-link" onClick={() => navigateToData('invers', { kab })}>{sumA || '-'}</button></td>
-                                <td className="rekap-frozen-total" style={{ left: '241px', width: '58px', minWidth: '58px', maxWidth: '58px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab })}>{sumV || '-'}</button></td>
-                                <td className="rekap-frozen-total rekap-cell-lolos" style={{ left: '299px', width: '50px', minWidth: '50px', maxWidth: '50px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab, status: 'LOLOS' })}>{sumL || '-'}</button></td>
-                                <td className="rekap-frozen-total rekap-cell-tidak" style={{ left: '349px', width: '60px', minWidth: '60px', maxWidth: '60px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab, status: 'TIDAK_LOLOS' })}>{sumTL || '-'}</button></td>
-                                <td className="rekap-frozen-total rekap-cell-belum" style={{ left: '409px', width: '50px', minWidth: '50px', maxWidth: '50px' }}><button className="rekap-link" onClick={() => navigateToData('invers', { kab, status: 'BELUM' })}>{sumB || '-'}</button></td>
-                                <td className="rekap-frozen-total rekap-cell-skdirjen" style={{ left: '459px', width: '55px', minWidth: '55px', maxWidth: '55px' }}><span className="sk-dirjen-badge sudah">{sumSKS || '-'}</span></td>
-                                <td className="rekap-frozen-total rekap-cell-skdirjen" style={{ left: '514px', width: '55px', minWidth: '55px', maxWidth: '55px', borderRight: '3px solid #64748b' }}><span className="sk-dirjen-badge belum">{sumSKB || '-'}</span></td>
+                                <td className="rekap-frozen-total" style={{ left: '187px', width: '58px', minWidth: '58px', maxWidth: '58px' }}><button className="rekap-link" onClick={() => navigateToData('invers', { kab })}>{sumA || '-'}</button></td>
+                                <td className="rekap-frozen-total" style={{ left: '245px', width: '68px', minWidth: '68px', maxWidth: '68px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab })}>{sumV || '-'}</button></td>
+                                <td className="rekap-frozen-total rekap-cell-lolos" style={{ left: '313px', width: '52px', minWidth: '52px', maxWidth: '52px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab, status: 'LOLOS' })}>{sumL || '-'}</button></td>
+                                <td className="rekap-frozen-total rekap-cell-tidak" style={{ left: '365px', width: '75px', minWidth: '75px', maxWidth: '75px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab, status: 'TIDAK_LOLOS' })}>{sumTL || '-'}</button></td>
+                                <td className="rekap-frozen-total rekap-cell-belum" style={{ left: '440px', width: '52px', minWidth: '52px', maxWidth: '52px' }}><button className="rekap-link" onClick={() => navigateToData('invers', { kab, status: 'BELUM' })}>{sumB || '-'}</button></td>
+                                <td className="rekap-frozen-total rekap-cell-skdirjen" style={{ left: '492px', width: '54px', minWidth: '54px', maxWidth: '54px' }}><button className="rekap-link" onClick={() => navigateToGlobalSearch({ kab, sk_dirjen: 'SUDAH', status: 'LOLOS' })}><span className="sk-dirjen-badge sudah">{sumSKS || '-'}</span></button></td>
+                                <td className="rekap-frozen-total rekap-cell-skdirjen" style={{ left: '546px', width: '54px', minWidth: '54px', maxWidth: '54px', borderRight: '3px solid #64748b' }}><button className="rekap-link" onClick={() => navigateToGlobalSearch({ kab, sk_dirjen: 'BELUM', status: 'LOLOS' })}><span className="sk-dirjen-badge belum">{sumSKB || '-'}</span></button></td>
                                 {groupStages.map(stage => {
                                   const kd = stage.kabupaten_data[kabIdx];
                                   const a = kd?.alokasi || 0;
@@ -5460,13 +5590,13 @@ function App() {
                                   const skb = kd?.sk_dirjen_belum || 0;
                                   return (
                                     <React.Fragment key={stage.stage_id}>
-                                      <td className="rekap-cell" style={{ width: '48px', minWidth: '48px', maxWidth: '48px' }}><button className="rekap-link" onClick={() => navigateToData('invers', { kab, tahap: stage.stage_id })}>{a || '-'}</button></td>
-                                      <td className="rekap-cell" style={{ width: '52px', minWidth: '52px', maxWidth: '52px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab, tahap: stage.stage_id })}>{v || '-'}</button></td>
-                                      <td className="rekap-cell rekap-cell-lolos" style={{ width: '46px', minWidth: '46px', maxWidth: '46px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab, tahap: stage.stage_id, status: 'LOLOS' })}>{l || '-'}</button></td>
-                                      <td className="rekap-cell rekap-cell-tidak" style={{ width: '54px', minWidth: '54px', maxWidth: '54px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab, tahap: stage.stage_id, status: 'TIDAK_LOLOS' })}>{tl || '-'}</button></td>
-                                      <td className="rekap-cell rekap-cell-belum" style={{ width: '46px', minWidth: '46px', maxWidth: '46px' }}><button className="rekap-link" onClick={() => navigateToData('invers', { kab, tahap: stage.stage_id, status: 'BELUM' })}>{b || '-'}</button></td>
-                                      <td className="rekap-cell rekap-cell-skdirjen" style={{ width: '54px', minWidth: '54px', maxWidth: '54px' }}><span className="sk-dirjen-badge sudah">{sks || '-'}</span></td>
-                                      <td className="rekap-cell rekap-cell-skdirjen" style={{ width: '54px', minWidth: '54px', maxWidth: '54px', borderRight: '2px solid #dee2e6' }}><span className="sk-dirjen-badge belum">{skb || '-'}</span></td>
+                                      <td className="rekap-cell" style={{ width: '58px', minWidth: '58px', maxWidth: '58px' }}><button className="rekap-link" onClick={() => navigateToData('invers', { kab, tahap: stage.stage_id })}>{a || '-'}</button></td>
+                                      <td className="rekap-cell" style={{ width: '68px', minWidth: '68px', maxWidth: '68px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab, tahap: stage.stage_id })}>{v || '-'}</button></td>
+                                      <td className="rekap-cell rekap-cell-lolos" style={{ width: '52px', minWidth: '52px', maxWidth: '52px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab, tahap: stage.stage_id, status: 'LOLOS' })}>{l || '-'}</button></td>
+                                      <td className="rekap-cell rekap-cell-tidak" style={{ width: '75px', minWidth: '75px', maxWidth: '75px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab, tahap: stage.stage_id, status: 'TIDAK_LOLOS' })}>{tl || '-'}</button></td>
+                                      <td className="rekap-cell rekap-cell-belum" style={{ width: '52px', minWidth: '52px', maxWidth: '52px' }}><button className="rekap-link" onClick={() => navigateToData('invers', { kab, tahap: stage.stage_id, status: 'BELUM' })}>{b || '-'}</button></td>
+                                      <td className="rekap-cell rekap-cell-skdirjen" style={{ width: '54px', minWidth: '54px', maxWidth: '54px' }}><button className="rekap-link" onClick={() => navigateToGlobalSearch({ kab, tahap: stage.stage_id, sk_dirjen: 'SUDAH', status: 'LOLOS' })}><span className="sk-dirjen-badge sudah">{sks || '-'}</span></button></td>
+                                      <td className="rekap-cell rekap-cell-skdirjen" style={{ width: '54px', minWidth: '54px', maxWidth: '54px', borderRight: '2px solid #dee2e6' }}><button className="rekap-link" onClick={() => navigateToGlobalSearch({ kab, tahap: stage.stage_id, sk_dirjen: 'BELUM', status: 'LOLOS' })}><span className="sk-dirjen-badge belum">{skb || '-'}</span></button></td>
                                     </React.Fragment>
                                   );
                                 })}
@@ -5492,13 +5622,13 @@ function App() {
                               });
                                return (
                                 <>
-                                  <td className="rekap-footer-frozen rekap-footer-total-sticky" style={{ left: '187px', width: '54px', minWidth: '54px', maxWidth: '54px' }}><button className="rekap-link" onClick={() => navigateToData('invers')}>{gA}</button></td>
-                                  <td className="rekap-footer-frozen rekap-footer-total-sticky" style={{ left: '241px', width: '58px', minWidth: '58px', maxWidth: '58px' }}><button className="rekap-link" onClick={() => navigateToData('verified')}>{gV}</button></td>
-                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-lolos" style={{ left: '299px', width: '50px', minWidth: '50px', maxWidth: '50px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { status: 'LOLOS' })}>{gL}</button></td>
-                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-tidak" style={{ left: '349px', width: '60px', minWidth: '60px', maxWidth: '60px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { status: 'TIDAK_LOLOS' })}>{gTL}</button></td>
-                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-belum" style={{ left: '409px', width: '50px', minWidth: '50px', maxWidth: '50px' }}><button className="rekap-link" onClick={() => navigateToData('invers', { status: 'BELUM' })}>{gB}</button></td>
-                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-skdirjen" style={{ left: '459px', width: '55px', minWidth: '55px', maxWidth: '55px' }}><span className="sk-dirjen-badge sudah">{gSKS}</span></td>
-                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-skdirjen" style={{ left: '514px', width: '55px', minWidth: '55px', maxWidth: '55px', borderRight: '3px solid #64748b' }}><span className="sk-dirjen-badge belum">{gSKB}</span></td>
+                                  <td className="rekap-footer-frozen rekap-footer-total-sticky" style={{ left: '187px', width: '58px', minWidth: '58px', maxWidth: '58px' }}><button className="rekap-link" onClick={() => navigateToData('invers')}>{gA}</button></td>
+                                  <td className="rekap-footer-frozen rekap-footer-total-sticky" style={{ left: '245px', width: '68px', minWidth: '68px', maxWidth: '68px' }}><button className="rekap-link" onClick={() => navigateToData('verified')}>{gV}</button></td>
+                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-lolos" style={{ left: '313px', width: '52px', minWidth: '52px', maxWidth: '52px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { status: 'LOLOS' })}>{gL}</button></td>
+                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-tidak" style={{ left: '365px', width: '75px', minWidth: '75px', maxWidth: '75px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { status: 'TIDAK_LOLOS' })}>{gTL}</button></td>
+                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-belum" style={{ left: '440px', width: '52px', minWidth: '52px', maxWidth: '52px' }}><button className="rekap-link" onClick={() => navigateToData('invers', { status: 'BELUM' })}>{gB}</button></td>
+                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-skdirjen" style={{ left: '492px', width: '54px', minWidth: '54px', maxWidth: '54px' }}><button className="rekap-link" onClick={() => navigateToGlobalSearch({ sk_dirjen: 'SUDAH', status: 'LOLOS' })}><span className="sk-dirjen-badge sudah">{gSKS}</span></button></td>
+                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-skdirjen" style={{ left: '546px', width: '54px', minWidth: '54px', maxWidth: '54px', borderRight: '3px solid #64748b' }}><button className="rekap-link" onClick={() => navigateToGlobalSearch({ sk_dirjen: 'BELUM', status: 'LOLOS' })}><span className="sk-dirjen-badge belum">{gSKB}</span></button></td>
                                 </>
                                );
                               })()}
@@ -5506,13 +5636,13 @@ function App() {
                                 const t = stage.totals;
                                 return (
                                   <React.Fragment key={stage.stage_id}>
-                                    <td className="rekap-footer-cell" style={{ width: '48px', minWidth: '48px', maxWidth: '48px' }}><button className="rekap-link" onClick={() => navigateToData('invers', { tahap: stage.stage_id })}>{t.alokasi}</button></td>
-                                    <td className="rekap-footer-cell" style={{ width: '52px', minWidth: '52px', maxWidth: '52px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { tahap: stage.stage_id })}>{t.verifikasi}</button></td>
-                                    <td className="rekap-footer-cell rekap-cell-lolos" style={{ width: '46px', minWidth: '46px', maxWidth: '46px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { tahap: stage.stage_id, status: 'LOLOS' })}>{t.lolos}</button></td>
-                                    <td className="rekap-footer-cell rekap-cell-tidak" style={{ width: '54px', minWidth: '54px', maxWidth: '54px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { tahap: stage.stage_id, status: 'TIDAK_LOLOS' })}>{t.tidak_lolos}</button></td>
-                                    <td className="rekap-footer-cell rekap-cell-belum" style={{ width: '46px', minWidth: '46px', maxWidth: '46px' }}><button className="rekap-link" onClick={() => navigateToData('invers', { tahap: stage.stage_id, status: 'BELUM' })}>{t.belum_verifikasi}</button></td>
-                                    <td className="rekap-footer-cell rekap-cell-skdirjen" style={{ width: '54px', minWidth: '54px', maxWidth: '54px' }}><span className="sk-dirjen-badge sudah">{t.sk_dirjen_sudah || '-'}</span></td>
-                                    <td className="rekap-footer-cell rekap-cell-skdirjen" style={{ width: '54px', minWidth: '54px', maxWidth: '54px', borderRight: '2px solid #dee2e6' }}><span className="sk-dirjen-badge belum">{t.sk_dirjen_belum || '-'}</span></td>
+                                    <td className="rekap-footer-cell" style={{ width: '58px', minWidth: '58px', maxWidth: '58px' }}><button className="rekap-link" onClick={() => navigateToData('invers', { tahap: stage.stage_id })}>{t.alokasi}</button></td>
+                                    <td className="rekap-footer-cell" style={{ width: '68px', minWidth: '68px', maxWidth: '68px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { tahap: stage.stage_id })}>{t.verifikasi}</button></td>
+                                    <td className="rekap-footer-cell rekap-cell-lolos" style={{ width: '52px', minWidth: '52px', maxWidth: '52px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { tahap: stage.stage_id, status: 'LOLOS' })}>{t.lolos}</button></td>
+                                    <td className="rekap-footer-cell rekap-cell-tidak" style={{ width: '75px', minWidth: '75px', maxWidth: '75px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { tahap: stage.stage_id, status: 'TIDAK_LOLOS' })}>{t.tidak_lolos}</button></td>
+                                    <td className="rekap-footer-cell rekap-cell-belum" style={{ width: '52px', minWidth: '52px', maxWidth: '52px' }}><button className="rekap-link" onClick={() => navigateToData('invers', { tahap: stage.stage_id, status: 'BELUM' })}>{t.belum_verifikasi}</button></td>
+                                    <td className="rekap-footer-cell rekap-cell-skdirjen" style={{ width: '54px', minWidth: '54px', maxWidth: '54px' }}><button className="rekap-link" onClick={() => navigateToGlobalSearch({ tahap: stage.stage_id, sk_dirjen: 'SUDAH', status: 'LOLOS' })}><span className="sk-dirjen-badge sudah">{t.sk_dirjen_sudah || '-'}</span></button></td>
+                                    <td className="rekap-footer-cell rekap-cell-skdirjen" style={{ width: '54px', minWidth: '54px', maxWidth: '54px', borderRight: '2px solid #dee2e6' }}><button className="rekap-link" onClick={() => navigateToGlobalSearch({ tahap: stage.stage_id, sk_dirjen: 'BELUM', status: 'LOLOS' })}><span className="sk-dirjen-badge belum">{t.sk_dirjen_belum || '-'}</span></button></td>
                                   </React.Fragment>
                                 );
                               })}
@@ -5595,7 +5725,7 @@ function App() {
                           <tr>
                             <th className="rekap-corner-cell" rowSpan="2" style={{ width: '32px', minWidth: '32px', maxWidth: '32px', left: 0 }}>No</th>
                             <th className="rekap-corner-cell" rowSpan="2" style={{ width: '155px', minWidth: '155px', maxWidth: '155px', left: '32px', textAlign: 'left', borderRight: '2px solid #bfc6d0', whiteSpace: 'normal', wordBreak: 'break-word' }}>Kabupaten / Kota</th>
-                            <th colSpan="5" className="rekap-corner-cell rekap-total-group-th" style={{ left: '187px', width: '272px', minWidth: '272px', maxWidth: '272px', borderRight: '2px solid #bfc6d0' }}>
+                            <th colSpan="5" className="rekap-corner-cell rekap-total-group-th" style={{ left: '187px', width: '305px', minWidth: '305px', maxWidth: '305px', borderRight: '2px solid #bfc6d0' }}>
                               REKAP TOTAL
                             </th>
                             {groupStages.map(stage => {
@@ -5619,11 +5749,11 @@ function App() {
                             })}
                           </tr>
                           <tr>
-                            <th className="rekap-sub-th rekap-sub-total-sticky" style={{ left: '187px', width: '54px', minWidth: '54px', maxWidth: '54px' }}>ALOKASI</th>
-                            <th className="rekap-sub-th rekap-sub-total-sticky" style={{ left: '241px', width: '58px', minWidth: '58px', maxWidth: '58px' }}>VERIFIKASI</th>
-                            <th className="rekap-sub-th rekap-sub-lolos rekap-sub-total-sticky" style={{ left: '299px', width: '50px', minWidth: '50px', maxWidth: '50px' }}>LOLOS</th>
-                            <th className="rekap-sub-th rekap-sub-tidak rekap-sub-total-sticky" style={{ left: '349px', width: '60px', minWidth: '60px', maxWidth: '60px' }}>TIDAK LOLOS</th>
-                            <th className="rekap-sub-th rekap-sub-belum rekap-sub-total-sticky" style={{ left: '409px', width: '50px', minWidth: '50px', maxWidth: '50px', borderRight: '2px solid #bfc6d0' }}>BELUM</th>
+                            <th className="rekap-sub-th rekap-sub-total-sticky" style={{ left: '187px', width: '58px', minWidth: '58px', maxWidth: '58px' }}>ALOKASI</th>
+                            <th className="rekap-sub-th rekap-sub-total-sticky" style={{ left: '245px', width: '68px', minWidth: '68px', maxWidth: '68px' }}>VERIFIKASI</th>
+                            <th className="rekap-sub-th rekap-sub-lolos rekap-sub-total-sticky" style={{ left: '313px', width: '52px', minWidth: '52px', maxWidth: '52px' }}>LOLOS</th>
+                            <th className="rekap-sub-th rekap-sub-tidak rekap-sub-total-sticky" style={{ left: '365px', width: '75px', minWidth: '75px', maxWidth: '75px' }}>TIDAK LOLOS</th>
+                            <th className="rekap-sub-th rekap-sub-belum rekap-sub-total-sticky" style={{ left: '440px', width: '52px', minWidth: '52px', maxWidth: '52px', borderRight: '2px solid #bfc6d0' }}>BELUM</th>
                             {groupStages.map(stage => (
                               <React.Fragment key={stage.stage_id}>
                                 <th className="rekap-sub-th">ALOKASI</th>
@@ -5656,11 +5786,11 @@ function App() {
                               <tr key={kabIdx} className={!hasAnyData ? 'rekap-row-empty' : ''}>
                                 <td className="rekap-frozen-no" style={{ width: '32px', minWidth: '32px', maxWidth: '32px', left: 0 }}>{kabIdx + 1}</td>
                                 <td className="rekap-frozen-kab" style={{ width: '155px', minWidth: '155px', maxWidth: '155px', left: '32px', whiteSpace: 'normal', wordBreak: 'break-word' }}>{kab}</td>
-                                <td className="rekap-frozen-total" style={{ left: '187px', width: '54px', minWidth: '54px', maxWidth: '54px' }}><button className="rekap-link" onClick={() => navigateToData('invers', { kab })}>{sumA || '-'}</button></td>
-                                <td className="rekap-frozen-total" style={{ left: '241px', width: '58px', minWidth: '58px', maxWidth: '58px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab })}>{sumV || '-'}</button></td>
-                                <td className="rekap-frozen-total rekap-cell-lolos" style={{ left: '299px', width: '50px', minWidth: '50px', maxWidth: '50px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab, status: 'LOLOS' })}>{sumL || '-'}</button></td>
-                                <td className="rekap-frozen-total rekap-cell-tidak" style={{ left: '349px', width: '60px', minWidth: '60px', maxWidth: '60px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab, status: 'TIDAK_LOLOS' })}>{sumTL || '-'}</button></td>
-                                <td className="rekap-frozen-total rekap-cell-belum" style={{ left: '409px', width: '50px', minWidth: '50px', maxWidth: '50px', borderRight: '2px solid #bfc6d0' }}><button className="rekap-link" onClick={() => navigateToData('invers', { kab, status: 'BELUM' })}>{sumB || '-'}</button></td>
+                                <td className="rekap-frozen-total" style={{ left: '187px', width: '58px', minWidth: '58px', maxWidth: '58px' }}><button className="rekap-link" onClick={() => navigateToData('invers', { kab })}>{sumA || '-'}</button></td>
+                                <td className="rekap-frozen-total" style={{ left: '245px', width: '68px', minWidth: '68px', maxWidth: '68px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab })}>{sumV || '-'}</button></td>
+                                <td className="rekap-frozen-total rekap-cell-lolos" style={{ left: '313px', width: '52px', minWidth: '52px', maxWidth: '52px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab, status: 'LOLOS' })}>{sumL || '-'}</button></td>
+                                <td className="rekap-frozen-total rekap-cell-tidak" style={{ left: '365px', width: '75px', minWidth: '75px', maxWidth: '75px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { kab, status: 'TIDAK_LOLOS' })}>{sumTL || '-'}</button></td>
+                                <td className="rekap-frozen-total rekap-cell-belum" style={{ left: '440px', width: '52px', minWidth: '52px', maxWidth: '52px', borderRight: '2px solid #bfc6d0' }}><button className="rekap-link" onClick={() => navigateToData('invers', { kab, status: 'BELUM' })}>{sumB || '-'}</button></td>
                                 {groupStages.map(stage => {
                                   const kd = stage.kabupaten_data[kabIdx];
                                   const a = kd?.alokasi || 0;
@@ -5698,11 +5828,11 @@ function App() {
                               });
                                return (
                                 <>
-                                  <td className="rekap-footer-frozen rekap-footer-total-sticky" style={{ left: '187px', width: '54px', minWidth: '54px', maxWidth: '54px' }}><button className="rekap-link" onClick={() => navigateToData('invers')}>{gA}</button></td>
-                                  <td className="rekap-footer-frozen rekap-footer-total-sticky" style={{ left: '241px', width: '58px', minWidth: '58px', maxWidth: '58px' }}><button className="rekap-link" onClick={() => navigateToData('verified')}>{gV}</button></td>
-                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-lolos" style={{ left: '299px', width: '50px', minWidth: '50px', maxWidth: '50px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { status: 'LOLOS' })}>{gL}</button></td>
-                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-tidak" style={{ left: '349px', width: '60px', minWidth: '60px', maxWidth: '60px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { status: 'TIDAK_LOLOS' })}>{gTL}</button></td>
-                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-belum" style={{ left: '409px', width: '50px', minWidth: '50px', maxWidth: '50px', borderRight: '2px solid #bfc6d0' }}><button className="rekap-link" onClick={() => navigateToData('invers', { status: 'BELUM' })}>{gB}</button></td>
+                                  <td className="rekap-footer-frozen rekap-footer-total-sticky" style={{ left: '187px', width: '58px', minWidth: '58px', maxWidth: '58px' }}><button className="rekap-link" onClick={() => navigateToData('invers')}>{gA}</button></td>
+                                  <td className="rekap-footer-frozen rekap-footer-total-sticky" style={{ left: '245px', width: '68px', minWidth: '68px', maxWidth: '68px' }}><button className="rekap-link" onClick={() => navigateToData('verified')}>{gV}</button></td>
+                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-lolos" style={{ left: '313px', width: '52px', minWidth: '52px', maxWidth: '52px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { status: 'LOLOS' })}>{gL}</button></td>
+                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-tidak" style={{ left: '365px', width: '75px', minWidth: '75px', maxWidth: '75px' }}><button className="rekap-link" onClick={() => navigateToData('verified', { status: 'TIDAK_LOLOS' })}>{gTL}</button></td>
+                                  <td className="rekap-footer-frozen rekap-footer-total-sticky rekap-cell-belum" style={{ left: '440px', width: '52px', minWidth: '52px', maxWidth: '52px', borderRight: '2px solid #bfc6d0' }}><button className="rekap-link" onClick={() => navigateToData('invers', { status: 'BELUM' })}>{gB}</button></td>
                                 </>
                                );
                               })()}
@@ -5952,6 +6082,86 @@ function App() {
             })()}
           </div>
         )}
+
+      {/* Modal Input Alasan Tidak Lolos */}
+      {disqualifyModalRecord && (
+        <div className="modal-overlay" onClick={() => setDisqualifyModalRecord(null)}>
+          <div className="modal-content" style={{ maxWidth: '520px' }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header" style={{ backgroundColor: '#fef2f2', borderBottom: '1px solid #fee2e2' }}>
+              <h3 style={{ color: '#dc2626', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '1rem', fontWeight: '700' }}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                Input Alasan Tidak Lolos
+              </h3>
+              <button className="modal-close" onClick={() => setDisqualifyModalRecord(null)}>&times;</button>
+            </div>
+            <div className="modal-body" style={{ padding: '20px' }}>
+              <div style={{ backgroundColor: '#f8fafc', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', border: '1px solid #e2e8f0', fontSize: '0.85rem' }}>
+                <div style={{ fontWeight: '700', color: 'var(--text-primary)', marginBottom: '4px' }}>
+                  {disqualifyModalRecord.nama}
+                </div>
+                <div style={{ color: 'var(--text-muted)' }}>
+                  NIK: <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{disqualifyModalRecord.no_ktp}</span>
+                  {disqualifyModalRecord.desa_kelurahan ? ` • ${disqualifyModalRecord.desa_kelurahan}` : ''}
+                  {disqualifyModalRecord.kabupaten_kota ? `, ${disqualifyModalRecord.kabupaten_kota}` : ''}
+                </div>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '16px' }}>
+                <label className="form-label" style={{ fontWeight: '600', fontSize: '0.85rem', marginBottom: '6px', display: 'block' }}>
+                  Alasan Tidak Lolos <span style={{ color: 'var(--danger)' }}>*</span>
+                </label>
+                <select
+                  className="form-input"
+                  value={disqualifyReason}
+                  onChange={(e) => setDisqualifyReason(e.target.value)}
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', fontSize: '0.85rem', fontWeight: '500' }}
+                >
+                  {DISQUALIFY_REASONS.map((r) => (
+                    <option key={r.code} value={r.code}>{r.label}</option>
+                  ))}
+                </select>
+                <small style={{ color: 'var(--text-muted)', fontSize: '0.78rem', marginTop: '4px', display: 'block' }}>
+                  Kode angka (1-9) akan terinput otomatis ke Kolom J ("Alasan Tidak Lolos") sheet LAMP.IIIA.
+                </small>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '8px' }}>
+                <label className="form-label" style={{ fontWeight: '600', fontSize: '0.85rem', marginBottom: '6px', display: 'block' }}>
+                  Keterangan {disqualifyReason === '9' ? <span style={{ color: 'var(--danger)' }}>* (Wajib diisi untuk opsi 9)</span> : <span style={{ color: 'var(--text-muted)' }}>(Opsional)</span>}
+                </label>
+                <textarea
+                  className="form-input"
+                  rows="3"
+                  placeholder={disqualifyReason === '9' ? "Tuliskan rincian keterangan alasan lainnya..." : "Tuliskan keterangan tambahan jika ada..."}
+                  value={disqualifyKeterangan}
+                  onChange={(e) => setDisqualifyKeterangan(e.target.value)}
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', fontSize: '0.85rem', resize: 'vertical' }}
+                />
+                <small style={{ color: 'var(--text-muted)', fontSize: '0.78rem', marginTop: '4px', display: 'block' }}>
+                  Teks ini akan terinput ke Kolom V ("Keterangan") sheet LAMP.IIIA.
+                </small>
+              </div>
+            </div>
+            <div className="modal-footer" style={{ padding: '14px 20px', display: 'flex', justifyContent: 'flex-end', gap: '10px', borderTop: '1px solid #e2e8f0' }}>
+              <button
+                className="btn btn-secondary"
+                onClick={() => setDisqualifyModalRecord(null)}
+                disabled={disqualifySubmitting}
+              >
+                Batal
+              </button>
+              <button
+                className="btn btn-danger"
+                onClick={handleConfirmDisqualify}
+                disabled={disqualifySubmitting}
+                style={{ backgroundColor: '#dc2626', borderColor: '#dc2626' }}
+              >
+                {disqualifySubmitting ? 'Menyimpan...' : 'Simpan Status & Alasan'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Rename Modal (Stage & Batch) */}
       {showRenameModal && (

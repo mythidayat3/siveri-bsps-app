@@ -47,10 +47,10 @@ body {
 
 /* Sidebar styling - SIVERI BSPS Green Theme */
 .sidebar {
-  width: 215px;
+  width: 260px;
   background: linear-gradient(180deg, #0f766e 0%, #064e3b 100%);
   border-right: 1px solid rgba(255, 255, 255, 0.1);
-  padding: 14px 10px;
+  padding: 24px 16px;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -1472,11 +1472,12 @@ body {
   z-index: 20;
   background: #f0f3f8;
   text-align: center;
-  padding: 6px 6px;
+  padding: 6px 4px;
   font-weight: 600;
-  font-size: 0.7rem;
+  font-size: 0.72rem;
   color: var(--text-secondary);
-  letter-spacing: 0.3px;
+  letter-spacing: 0.2px;
+  line-height: 1.2;
   white-space: nowrap;
   border-bottom: 2px solid #bfc6d0;
   border-right: 1px solid #e0e4ea;
