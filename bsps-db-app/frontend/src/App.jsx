@@ -850,6 +850,43 @@ function App() {
     }
   };
 
+  const handleDeleteCurrentProvince = async () => {
+    const activeProv = provinces.find(p => p.id === selectedProvinceId);
+    if (!activeProv) return;
+    
+    if (provinces.length <= 1) {
+      showToast('Tidak dapat menghapus provinsi terakhir', 'error');
+      return;
+    }
+
+    const confirmMsg = `APAKAH ANDA YAKIN INGIN MENGHAPUS PROVINSI "${activeProv.name}"?\n\nTindakan ini akan MENGHAPUS SELURUH TAHAP, BATCH BERITA ACARA, DATA LAPANGAN, DAN SK DIRJEN yang berhubungan dengan provinsi ${activeProv.name}!\n\nTindakan ini TIDAK DAPAT DIBATALKAN!`;
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/provinces/${selectedProvinceId}`, {
+        method: 'DELETE'
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast(data.message || `Provinsi ${activeProv.name} berhasil dihapus`, 'success');
+        const remaining = provinces.filter(p => p.id !== selectedProvinceId);
+        setProvinces(remaining);
+        if (remaining.length > 0) {
+          const nextPid = remaining[0].id;
+          setSelectedProvinceId(nextPid);
+          localStorage.setItem('selectedProvinceId', nextPid);
+          setSelectedStageId('');
+          setSelectedBatchId('');
+          fetchStages(nextPid);
+        }
+      } else {
+        showToast(data.detail || 'Gagal menghapus provinsi', 'error');
+      }
+    } catch (err) {
+      showToast(err.message || 'Terjadi kesalahan saat menghapus provinsi', 'error');
+    }
+  };
+
   // Ambil data tahap berdasarkan provinsi aktif
   const fetchStages = useCallback(async (targetProvId) => {
     const pid = targetProvId || selectedProvinceId;
@@ -994,7 +1031,7 @@ function App() {
   const fetchRekapKeseluruhan = async () => {
     setRekapLoading(true);
     try {
-      const params = new URLSearchParams({ published_only: '1' });
+      const params = new URLSearchParams({ published_only: '1', province_id: selectedProvinceId });
       if (rekapPengusulFilter.length > 0) params.set('pengusul', rekapPengusulFilter.join(','));
       const res = await fetch(`${BACKEND_URL}/api/rekap-keseluruhan?${params}`);
       if (!res.ok) throw new Error("Gagal mengambil data rekap keseluruhan");
@@ -1010,7 +1047,7 @@ function App() {
   const fetchRekapUnggahan = async () => {
     setRekapLoading(true);
     try {
-      const params = new URLSearchParams();
+      const params = new URLSearchParams({ province_id: selectedProvinceId });
       if (rekapPengusulFilter.length > 0) params.set('pengusul', rekapPengusulFilter.join(','));
       const res = await fetch(`${BACKEND_URL}/api/rekap-keseluruhan?${params}`);
       if (!res.ok) throw new Error("Gagal mengambil data rekap unggahan");
@@ -1026,7 +1063,7 @@ function App() {
   const fetchRekapBatchBA = async () => {
     setRekapBatchLoading(true);
     try {
-      const res = await fetch(`${BACKEND_URL}/api/rekap-batch-ba?published_only=1`);
+      const res = await fetch(`${BACKEND_URL}/api/rekap-batch-ba?published_only=1&province_id=${selectedProvinceId}`);
       if (!res.ok) throw new Error("Gagal mengambil data rekap batch berita acara");
       const data = await res.json();
       setRekapBatchData(data);
@@ -1046,6 +1083,33 @@ function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rekapPengusulFilter]);
+
+  // Re-fetch data tab & subtab saat provinsi aktif atau tab aktif berubah
+  useEffect(() => {
+    if (activeTab === 'rekap') {
+      fetchRekapKeseluruhan();
+    } else if (activeTab === 'rekap-batch-ba') {
+      fetchRekapBatchBA();
+    } else if (activeTab === 'rekap-unggahan') {
+      fetchRekapUnggahan();
+    } else if (activeTab === 'global-search') {
+      fetchGlobalSearch();
+    } else if (activeTab === 'sk-dirjen') {
+      fetchSkDirjenBatches();
+      if (skDirjenActiveSubTab === 'rekap-tahap') {
+        fetchSkDirjenRekapPerTahap();
+      } else if (skDirjenActiveSubTab === 'rekap-kabupaten') {
+        fetchSkDirjenRekapPerKab(skDirjenSelectedBatch);
+      } else if (skDirjenActiveSubTab === 'daftar-pb') {
+        if (skDirjenSelectedBatch === 'all') {
+          fetchSkDirjenAllRecords();
+        } else if (skDirjenSelectedBatch) {
+          fetchSkDirjenRecords(skDirjenSelectedBatch);
+        }
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedProvinceId, activeTab, skDirjenActiveSubTab, skDirjenSelectedBatch]);
 
   const toggleRekapPengusul = (name) => {
     setRekapPengusulFilter(prev =>
@@ -1106,6 +1170,7 @@ function App() {
       if (globalFilterPengusul !== 'ALL') params.set('pengusul', globalFilterPengusul);
       if (globalFilterType !== 'all') params.set('record_type', globalFilterType);
       params.set('published_only', activeTab === 'rekap-unggahan' ? '0' : '1');
+      params.set('province_id', selectedProvinceId);
       params.set('page', overridePage || globalPage);
       params.set('limit', '30');
       const res = await fetch(`${BACKEND_URL}/api/global-search?${params}`);
@@ -1118,7 +1183,7 @@ function App() {
       setGlobalLoading(false);
     }
   }, [globalSearchQuery, globalFilterKab, globalFilterKec, globalFilterDesa,
-      globalFilterStatus, globalFilterTahap, globalFilterSkDirjen, globalFilterPengusul, globalFilterType, globalPage]);
+      globalFilterStatus, globalFilterTahap, globalFilterSkDirjen, globalFilterPengusul, globalFilterType, globalPage, selectedProvinceId]);
 
   // Debounced search for global search input
   useEffect(() => {
@@ -1462,7 +1527,7 @@ function App() {
 
   const fetchSkDirjenBatches = async () => {
     try {
-      const res = await fetch(`${BACKEND_URL}/api/sk-dirjen/batches`);
+      const res = await fetch(`${BACKEND_URL}/api/sk-dirjen/batches?province_id=${selectedProvinceId}`);
       const data = await res.json();
       setSkDirjenBatches(data.batches);
       if (data.batches.length > 0 && skDirjenSelectedBatch === 'all' && skDirjenRecords.length === 0) {
@@ -1495,6 +1560,7 @@ function App() {
   const fetchSkDirjenAllRecords = async (filters = {}) => {
     try {
       const params = new URLSearchParams();
+      params.append('province_id', selectedProvinceId);
       if (filters.q) params.append('q', filters.q);
       if (filters.kabupaten) params.append('kabupaten', filters.kabupaten);
       if (filters.kecamatan) params.append('kecamatan', filters.kecamatan);
@@ -1531,6 +1597,7 @@ function App() {
       const formData = new FormData();
       formData.append('file', file);
       formData.append('stage_name', skDirjenStageName.trim());
+      formData.append('province_id', selectedProvinceId);
       const res = await fetch(`${BACKEND_URL}/api/sk-dirjen/upload`, { method: 'POST', body: formData });
       if (!res.ok) {
         const err = await res.json();
@@ -1642,7 +1709,7 @@ function App() {
 
   const fetchSkDirjenRekapPerTahap = async () => {
     try {
-      const res = await fetch(`${BACKEND_URL}/api/sk-dirjen/rekap-per-tahap`);
+      const res = await fetch(`${BACKEND_URL}/api/sk-dirjen/rekap-per-tahap?province_id=${selectedProvinceId}`);
       const data = await res.json();
       setSkDirjenRekapPerTahap(data);
     } catch (err) {
@@ -1653,8 +1720,8 @@ function App() {
   const fetchSkDirjenRekapPerKab = async (batchId) => {
     try {
       const url = batchId === 'all'
-        ? `${BACKEND_URL}/api/sk-dirjen/rekap-per-kabupaten/all`
-        : `${BACKEND_URL}/api/sk-dirjen/rekap-per-kabupaten/${batchId}`;
+        ? `${BACKEND_URL}/api/sk-dirjen/rekap-per-kabupaten/all?province_id=${selectedProvinceId}`
+        : `${BACKEND_URL}/api/sk-dirjen/rekap-per-kabupaten/${batchId}?province_id=${selectedProvinceId}`;
       const res = await fetch(url);
       const data = await res.json();
       setSkDirjenRekapPerKab(data);
@@ -2871,16 +2938,30 @@ function App() {
         <div className="form-group" style={{ marginBottom: '16px' }}>
           <label className="form-label" style={{ color: '#a7f3d0', fontSize: '0.8rem', fontWeight: '600', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span>Wilayah Provinsi</span>
-            {isAdmin && (
-              <button 
-                type="button"
-                onClick={() => setShowAddProvinceModal(true)}
-                style={{ background: 'none', border: 'none', color: '#a7f3d0', cursor: 'pointer', fontSize: '0.75rem', fontWeight: '700', textDecoration: 'underline' }}
-                title="Tambah Provinsi Baru"
-              >
-                + Tambah
-              </button>
-            )}
+            <span style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              {isAdmin && (
+                <>
+                  <button 
+                    type="button"
+                    onClick={() => setShowAddProvinceModal(true)}
+                    style={{ background: 'none', border: 'none', color: '#a7f3d0', cursor: 'pointer', fontSize: '0.75rem', fontWeight: '700', textDecoration: 'underline' }}
+                    title="Tambah Provinsi Baru"
+                  >
+                    + Tambah
+                  </button>
+                  {provinces.length > 1 && (
+                    <button 
+                      type="button"
+                      onClick={handleDeleteCurrentProvince}
+                      style={{ background: 'none', border: 'none', color: '#fca5a5', cursor: 'pointer', fontSize: '0.75rem', fontWeight: '700', textDecoration: 'underline' }}
+                      title="Hapus Provinsi yang sedang dipilih beserta SELURUH data terkait"
+                    >
+                      🗑️ Hapus
+                    </button>
+                  )}
+                </>
+              )}
+            </span>
           </label>
           <select 
             className="form-input" 
@@ -2889,6 +2970,8 @@ function App() {
               const pid = parseInt(e.target.value);
               setSelectedProvinceId(pid);
               localStorage.setItem('selectedProvinceId', pid);
+              setSelectedStageId('');
+              setSelectedBatchId('');
               fetchStages(pid);
             }}
             style={{ padding: '8px 12px', fontSize: '0.85rem', background: 'rgba(255, 255, 255, 0.15)', color: '#ffffff', border: '1px solid rgba(255, 255, 255, 0.25)', fontWeight: '700' }}

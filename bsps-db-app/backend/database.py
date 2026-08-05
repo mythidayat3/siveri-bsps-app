@@ -9,6 +9,7 @@ def get_db_connection():
     try:
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute("PRAGMA busy_timeout=60000;")
+        conn.execute("PRAGMA foreign_keys = ON;")
     except Exception:
         pass
     return conn
@@ -187,9 +188,19 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         stage_name TEXT NOT NULL,
         filename TEXT,
-        uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        province_id INTEGER DEFAULT 1,
+        uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(province_id) REFERENCES provinces(id) ON DELETE CASCADE
     )
     """)
+
+    try:
+        cursor.execute("SELECT province_id FROM sk_dirjen_batches LIMIT 1")
+    except Exception:
+        cursor.execute("ALTER TABLE sk_dirjen_batches ADD COLUMN province_id INTEGER DEFAULT 1")
+    
+    cursor.execute("UPDATE sk_dirjen_batches SET province_id = 1 WHERE province_id IS NULL OR province_id = 0")
+    conn.commit()
     
     # 9. SK Dirjen Records
     cursor.execute("""

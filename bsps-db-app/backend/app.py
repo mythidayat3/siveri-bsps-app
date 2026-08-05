@@ -140,6 +140,39 @@ def create_province(body: dict = Body(...)):
     conn.close()
     return {"id": prov_id, "name": name, "message": f"Provinsi {name} berhasil ditambahkan"}
 
+@app.delete("/api/provinces/{province_id}")
+def delete_province(province_id: int):
+    conn = get_db_connection()
+    conn.execute("PRAGMA foreign_keys = ON;")
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, name FROM provinces WHERE id = ?", (province_id,))
+    prov = cursor.fetchone()
+    if not prov:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Provinsi tidak ditemukan")
+    
+    # Hapus data terkait secara eksplisit untuk jaminan pembersihan data
+    cursor.execute("SELECT id FROM invers_stages WHERE province_id = ?", (province_id,))
+    stage_ids = [r['id'] for r in cursor.fetchall()]
+    if stage_ids:
+        ph = ",".join("?" for _ in stage_ids)
+        cursor.execute(f"DELETE FROM verified_batches WHERE stage_id IN ({ph})", stage_ids)
+        cursor.execute(f"DELETE FROM invers_revisions WHERE stage_id IN ({ph})", stage_ids)
+        cursor.execute(f"DELETE FROM reconciliation_overrides WHERE stage_id IN ({ph})", stage_ids)
+        cursor.execute(f"DELETE FROM invers_manual_pairs WHERE stage_id IN ({ph})", stage_ids)
+        cursor.execute(f"DELETE FROM invers_stages WHERE id IN ({ph})", stage_ids)
+        
+    cursor.execute("SELECT id FROM sk_dirjen_batches WHERE province_id = ?", (province_id,))
+    sk_batch_ids = [r['id'] for r in cursor.fetchall()]
+    if sk_batch_ids:
+        ph_sk = ",".join("?" for _ in sk_batch_ids)
+        cursor.execute(f"DELETE FROM sk_dirjen_batches WHERE id IN ({ph_sk})", sk_batch_ids)
+
+    cursor.execute("DELETE FROM provinces WHERE id = ?", (province_id,))
+    conn.commit()
+    conn.close()
+    return {"status": "success", "message": f"Provinsi '{prov['name']}' beserta seluruh data terkait berhasil dihapus"}
+
 @app.get("/api/stages")
 def get_stages(province_id: int = Query(None)):
     conn = get_db_connection()
@@ -3445,54 +3478,64 @@ def export_rekap_keseluruhan(pengusul: str = ""):
 REKAP_CACHE = {}
 
 @app.get("/api/rekap-keseluruhan")
-def get_rekap_keseluruhan(published_only: int = 0, pengusul: str = ""):
+def get_rekap_keseluruhan(published_only: int = 0, pengusul: str = "", province_id: int = 1):
     pengusul_list = [p.strip() for p in pengusul.split(",") if p.strip()]
-    cache_key = f"rekap_{published_only}_{','.join(sorted(pengusul_list))}"
+    cache_key = f"rekap_{province_id}_{published_only}_{','.join(sorted(pengusul_list))}"
     now = time.time()
     if cache_key in REKAP_CACHE:
         ts, cached_data = REKAP_CACHE[cache_key]
-        if now - ts < 30:
+        if now - ts < 10:
             return cached_data
 
     import re
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Get all stages
-    cursor.execute("SELECT id, name FROM invers_stages ORDER BY id ASC")
+    # Get stages for current province
+    if not province_id or province_id == 1:
+        prov_stage_sql = "WHERE (province_id = 1 OR province_id IS NULL OR province_id = 0)"
+        prov_stage_params = ()
+    else:
+        prov_stage_sql = "WHERE province_id = ?"
+        prov_stage_params = (province_id,)
+
+    cursor.execute(f"SELECT id, name FROM invers_stages {prov_stage_sql} ORDER BY id ASC", prov_stage_params)
     all_stages = [dict(r) for r in cursor.fetchall()]
     def get_stage_num(s):
         match = re.search(r'\d+', s['name'])
         return int(match.group()) if match else 999
     all_stages = sorted(all_stages, key=get_stage_num)
     
-    # Distinct list of pengusul options for the filter UI (from active invers records)
-    cursor.execute("""
+    # Distinct list of pengusul options for the filter UI (from active invers records in current province)
+    cursor.execute(f"""
         SELECT DISTINCT UPPER(TRIM(COALESCE(ir.pengusul, ''))) as pengusul
         FROM invers_records ir
         JOIN invers_revisions irv ON ir.revision_id = irv.id
-        WHERE irv.is_active = 1 AND TRIM(COALESCE(ir.pengusul, '')) != ''
+        JOIN invers_stages s ON irv.stage_id = s.id
+        {prov_stage_sql} AND irv.is_active = 1 AND TRIM(COALESCE(ir.pengusul, '')) != ''
         ORDER BY pengusul ASC
-    """)
+    """, prov_stage_params)
     pengusul_options = [r['pengusul'] for r in cursor.fetchall()]
     
     published_filter = "AND vb.is_published = 1" if published_only else ""
     
-    # Get the full list of unique kabupaten across all stages
+    # Get the full list of unique kabupaten across current province stages
     cursor.execute(f"""
-        SELECT DISTINCT UPPER(TRIM(COALESCE(kabupaten_kota, ''))) as kab 
+        SELECT DISTINCT UPPER(TRIM(COALESCE(ir.kabupaten_kota, ''))) as kab 
         FROM invers_records ir
         JOIN invers_revisions irv ON ir.revision_id = irv.id
-        WHERE irv.is_active = 1 AND TRIM(COALESCE(kabupaten_kota, '')) != ''
+        JOIN invers_stages s ON irv.stage_id = s.id
+        {prov_stage_sql} AND irv.is_active = 1 AND TRIM(COALESCE(ir.kabupaten_kota, '')) != ''
         UNION
         SELECT DISTINCT UPPER(TRIM(COALESCE(vr.kabupaten_kota, ''))) as kab
         FROM verified_records vr
         JOIN verified_batches vb ON vr.batch_id = vb.id
+        JOIN invers_stages s ON vb.stage_id = s.id
         LEFT JOIN reconciliation_overrides ro ON ro.original_no_ktp = vr.no_ktp AND ro.stage_id = vb.stage_id
-        WHERE (vr.is_duplicate_in_previous = 0 OR ro.id IS NOT NULL) AND TRIM(COALESCE(vr.kabupaten_kota, '')) != ''
+        {prov_stage_sql} AND (vr.is_duplicate_in_previous = 0 OR ro.id IS NOT NULL) AND TRIM(COALESCE(vr.kabupaten_kota, '')) != ''
         {published_filter}
         ORDER BY kab ASC
-    """)
+    """, (*prov_stage_params, *prov_stage_params))
     all_kabupaten = [r['kab'] for r in cursor.fetchall()]
     
     # Pre-fetch SK Dirjen match counts per stage per kabupaten
@@ -3659,35 +3702,44 @@ def get_rekap_keseluruhan(published_only: int = 0, pengusul: str = ""):
 
 # --- REKAP BATCH BERITA ACARA ---
 @app.get("/api/rekap-batch-ba")
-def get_rekap_batch_ba(published_only: int = 1):
+def get_rekap_batch_ba(published_only: int = 1, province_id: int = 1):
     import re
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # 1. Get all stages
-    cursor.execute("SELECT id, name FROM invers_stages ORDER BY id ASC")
+    # 1. Get stages for current province
+    if not province_id or province_id == 1:
+        prov_stage_sql = "WHERE (province_id = 1 OR province_id IS NULL OR province_id = 0)"
+        prov_stage_params = ()
+    else:
+        prov_stage_sql = "WHERE province_id = ?"
+        prov_stage_params = (province_id,)
+
+    cursor.execute(f"SELECT id, name FROM invers_stages {prov_stage_sql} ORDER BY id ASC", prov_stage_params)
     all_stages = [dict(r) for r in cursor.fetchall()]
     def get_stage_num(s):
         match = re.search(r'\d+', s['name'])
         return int(match.group()) if match else 999
     all_stages = sorted(all_stages, key=get_stage_num)
     
-    # 2. Get list of kabupaten/kota
+    # 2. Get list of kabupaten/kota in current province
     published_filter = "AND vb.is_published = 1" if published_only else ""
     cursor.execute(f"""
-        SELECT DISTINCT UPPER(TRIM(COALESCE(kabupaten_kota, ''))) as kab 
+        SELECT DISTINCT UPPER(TRIM(COALESCE(ir.kabupaten_kota, ''))) as kab 
         FROM invers_records ir
         JOIN invers_revisions irv ON ir.revision_id = irv.id
-        WHERE irv.is_active = 1 AND TRIM(COALESCE(kabupaten_kota, '')) != ''
+        JOIN invers_stages s ON irv.stage_id = s.id
+        {prov_stage_sql} AND irv.is_active = 1 AND TRIM(COALESCE(ir.kabupaten_kota, '')) != ''
         UNION
         SELECT DISTINCT UPPER(TRIM(COALESCE(vr.kabupaten_kota, ''))) as kab
         FROM verified_records vr
         JOIN verified_batches vb ON vr.batch_id = vb.id
+        JOIN invers_stages s ON vb.stage_id = s.id
         LEFT JOIN reconciliation_overrides ro ON ro.original_no_ktp = vr.no_ktp AND ro.stage_id = vb.stage_id
-        WHERE (vr.is_duplicate_in_previous = 0 OR ro.id IS NOT NULL) AND TRIM(COALESCE(vr.kabupaten_kota, '')) != ''
+        {prov_stage_sql} AND (vr.is_duplicate_in_previous = 0 OR ro.id IS NOT NULL) AND TRIM(COALESCE(vr.kabupaten_kota, '')) != ''
         {published_filter}
         ORDER BY kab ASC
-    """)
+    """, (*prov_stage_params, *prov_stage_params))
     all_kabupaten = [r['kab'] for r in cursor.fetchall()]
     
     # 3. For each stage, get its batches
@@ -4105,6 +4157,7 @@ def global_search(
     pengusul: str = "",
     record_type: str = "all",
     published_only: int = 1,
+    province_id: int = 1,
     page: int = 1,
     limit: int = 30,
     export_all: bool = False
@@ -4114,6 +4167,12 @@ def global_search(
 
     conditions = []
     params = []
+
+    if not province_id or province_id == 1:
+        conditions.append("(ist.province_id = 1 OR ist.province_id IS NULL OR ist.province_id = 0)")
+    else:
+        conditions.append("ist.province_id = ?")
+        params.append(province_id)
 
     # --- Build WHERE clauses ---
     if q and len(q.strip()) >= 1:
@@ -4198,6 +4257,13 @@ def global_search(
     if record_type in ("all", "invers") and sk_dirjen != "SUDAH":
         invers_conditions = []
         invers_params = []
+        
+        if not province_id or province_id == 1:
+            invers_conditions.append("(ist.province_id = 1 OR ist.province_id IS NULL OR ist.province_id = 0)")
+        else:
+            invers_conditions.append("ist.province_id = ?")
+            invers_params.append(province_id)
+
         if q and len(q.strip()) >= 1:
             term = f"%{q.strip().upper()}%"
             invers_conditions.append("(UPPER(ir.nama) LIKE ? OR ir.no_ktp LIKE ? OR ir.no_kk LIKE ?)")
@@ -4740,6 +4806,7 @@ def export_excel(stage_id: int, batch_id: int = None):
 @app.post("/api/sk-dirjen/upload")
 async def upload_sk_dirjen(
     stage_name: str = Form(...),
+    province_id: int = Form(1),
     file: UploadFile = File(...)
 ):
     if not file.filename.endswith(('.xlsx', '.xls')):
@@ -4773,7 +4840,7 @@ async def upload_sk_dirjen(
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT id FROM sk_dirjen_batches WHERE stage_name = ?", (stage_name,))
+    cursor.execute("SELECT id FROM sk_dirjen_batches WHERE stage_name = ? AND province_id = ?", (stage_name, province_id))
     existing = cursor.fetchone()
     if existing:
         cursor.execute("DELETE FROM sk_dirjen_matches WHERE sk_record_id IN (SELECT id FROM sk_dirjen_records WHERE batch_id = ?)", (existing['id'],))
@@ -4781,7 +4848,7 @@ async def upload_sk_dirjen(
         cursor.execute("DELETE FROM sk_dirjen_batches WHERE id = ?", (existing['id'],))
         conn.commit()
     
-    cursor.execute("INSERT INTO sk_dirjen_batches (stage_name, filename) VALUES (?, ?)", (stage_name, file.filename))
+    cursor.execute("INSERT INTO sk_dirjen_batches (stage_name, filename, province_id) VALUES (?, ?, ?)", (stage_name, file.filename, province_id))
     batch_id = cursor.lastrowid
     
     header_lower = [h.lower().replace(' ', '').replace('.', '') for h in headers]
@@ -4838,10 +4905,13 @@ async def upload_sk_dirjen(
         cursor.execute("""
             SELECT vr.id, vr.nama, vr.no_ktp, vr.no_kk 
             FROM verified_records vr
+            JOIN verified_batches vb ON vb.id = vr.batch_id
+            JOIN invers_stages ist ON ist.id = vb.stage_id
             WHERE vr.no_ktp = ? AND vr.status = 'LOLOS'
-            ORDER BY (SELECT id FROM verified_batches WHERE id = vr.batch_id) DESC NULLS LAST
+              AND (ist.province_id = ? OR (? = 1 AND (ist.province_id IS NULL OR ist.province_id = 0)))
+            ORDER BY vb.id DESC NULLS LAST
             LIMIT 1
-        """, (nik,))
+        """, (nik, province_id, province_id))
         matched = cursor.fetchone()
         
         if matched:
@@ -4894,17 +4964,21 @@ async def upload_sk_dirjen(
     }
 
 @app.get("/api/sk-dirjen/batches")
-def get_sk_dirjen_batches():
+def get_sk_dirjen_batches(province_id: int = 1):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("""
+    
+    prov_sql = "WHERE (b.province_id = 1 OR b.province_id IS NULL OR b.province_id = 0)" if (not province_id or province_id == 1) else "WHERE b.province_id = ?"
+    params = () if (not province_id or province_id == 1) else (province_id,)
+
+    cursor.execute(f"""
         SELECT b.*, 
             (SELECT COUNT(*) FROM sk_dirjen_records WHERE batch_id = b.id) as total_records,
             (SELECT COUNT(*) FROM sk_dirjen_matches m JOIN sk_dirjen_records r ON m.sk_record_id = r.id WHERE r.batch_id = b.id AND m.match_type = 'PERFECT') as perfect_count,
             (SELECT COUNT(*) FROM sk_dirjen_matches m JOIN sk_dirjen_records r ON m.sk_record_id = r.id WHERE r.batch_id = b.id AND m.match_type = 'NEEDS_APPROVAL') as needs_approval_count,
             (SELECT COUNT(*) FROM sk_dirjen_matches m JOIN sk_dirjen_records r ON m.sk_record_id = r.id WHERE r.batch_id = b.id AND m.match_type = 'NO_MATCH') as no_match_count
-        FROM sk_dirjen_batches b ORDER BY b.id DESC
-    """)
+        FROM sk_dirjen_batches b {prov_sql} ORDER BY b.id DESC
+    """, params)
     batches = [dict(row) for row in cursor.fetchall()]
     conn.close()
     return {"batches": batches}
@@ -5055,7 +5129,7 @@ def get_sk_dirjen_records(batch_id: int, kabupaten: str = None, kecamatan: str =
     return {"records": records}
 
 @app.get("/api/sk-dirjen/all-records")
-def get_sk_dirjen_all_records(q: str = None, kabupaten: str = None, kecamatan: str = None, desa: str = None, status: str = None, tahap: str = None, asal_batch: str = None):
+def get_sk_dirjen_all_records(q: str = None, kabupaten: str = None, kecamatan: str = None, desa: str = None, status: str = None, tahap: str = None, asal_batch: str = None, province_id: int = 1):
     conn = get_db_connection()
     cursor = conn.cursor()
     
@@ -5078,6 +5152,12 @@ def get_sk_dirjen_all_records(q: str = None, kabupaten: str = None, kecamatan: s
     """
     params = []
     
+    if not province_id or province_id == 1:
+        query += " AND (sb.province_id = 1 OR sb.province_id IS NULL OR sb.province_id = 0)"
+    else:
+        query += " AND sb.province_id = ?"
+        params.append(province_id)
+
     if q and q.strip():
         search = f"%{q.strip().upper()}%"
         query += " AND (UPPER(r.nama) LIKE ? OR r.no_ktp LIKE ? OR r.no_kk LIKE ? OR UPPER(r.desa_kelurahan) LIKE ? OR UPPER(r.kecamatan) LIKE ? OR UPPER(r.kabupaten_kota) LIKE ?)"
@@ -5155,14 +5235,17 @@ def delete_sk_dirjen_batch(batch_id: int):
     return {"success": True, "message": f"Batch '{batch['stage_name']}' dan semua data terkait berhasil dihapus"}
 
 @app.get("/api/sk-dirjen/rekap-per-tahap")
-def get_sk_dirjen_rekap_per_tahap():
+def get_sk_dirjen_rekap_per_tahap(province_id: int = 1):
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT id, stage_name FROM sk_dirjen_batches ORDER BY id")
+    prov_sql = "WHERE (province_id = 1 OR province_id IS NULL OR province_id = 0)" if (not province_id or province_id == 1) else "WHERE province_id = ?"
+    params = () if (not province_id or province_id == 1) else (province_id,)
+
+    cursor.execute(f"SELECT id, stage_name FROM sk_dirjen_batches {prov_sql} ORDER BY id", params)
     sk_batches = [dict(row) for row in cursor.fetchall()]
     
-    cursor.execute("SELECT id, name FROM invers_stages ORDER BY id")
+    cursor.execute(f"SELECT id, name FROM invers_stages {prov_sql} ORDER BY id", params)
     invers_stages_raw = [dict(row) for row in cursor.fetchall()]
     
     def sort_stages(stages):
@@ -5207,23 +5290,29 @@ def get_sk_dirjen_rekap_per_tahap():
     return {"rekap": rekap, "invers_stages": [s['name'] for s in invers_stages]}
 
 @app.get("/api/sk-dirjen/rekap-per-kabupaten/all")
-def get_sk_dirjen_rekap_per_kabupaten_all():
+def get_sk_dirjen_rekap_per_kabupaten_all(province_id: int = 1):
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT DISTINCT UPPER(kabupaten_kota) as kab FROM sk_dirjen_records ORDER BY kab")
+    prov_b_sql = "WHERE (b.province_id = 1 OR b.province_id IS NULL OR b.province_id = 0)" if (not province_id or province_id == 1) else "WHERE b.province_id = ?"
+    prov_s_sql = "WHERE (s.province_id = 1 OR s.province_id IS NULL OR s.province_id = 0)" if (not province_id or province_id == 1) else "WHERE s.province_id = ?"
+    params_b = () if (not province_id or province_id == 1) else (province_id,)
+    params_s = () if (not province_id or province_id == 1) else (province_id,)
+
+    cursor.execute(f"SELECT DISTINCT UPPER(r.kabupaten_kota) as kab FROM sk_dirjen_records r JOIN sk_dirjen_batches b ON r.batch_id = b.id {prov_b_sql} ORDER BY kab", params_b)
     kabupatens = [row['kab'] for row in cursor.fetchall()]
     
-    cursor.execute("""
+    cursor.execute(f"""
         SELECT DISTINCT ist.name as inv_stage_name
         FROM sk_dirjen_matches m
         JOIN sk_dirjen_records r ON m.sk_record_id = r.id
+        JOIN sk_dirjen_batches b ON r.batch_id = b.id
         LEFT JOIN verified_records vr ON vr.id = m.verified_record_id
         LEFT JOIN verified_batches vb ON vb.id = COALESCE(vr.batch_id, m.verified_batch_id)
         JOIN invers_stages ist ON ist.id = vb.stage_id
-        WHERE (m.match_type = 'PERFECT' OR (m.match_type = 'NEEDS_APPROVAL' AND m.override_status = 'APPROVED') OR m.match_type = 'MANUAL_PAIR')
+        {prov_b_sql} AND (m.match_type = 'PERFECT' OR (m.match_type = 'NEEDS_APPROVAL' AND m.override_status = 'APPROVED') OR m.match_type = 'MANUAL_PAIR')
         ORDER BY ist.name
-    """)
+    """, params_b)
     inv_stages_raw = [row['inv_stage_name'] for row in cursor.fetchall()]
     
     import re
@@ -5244,13 +5333,14 @@ def get_sk_dirjen_rekap_per_kabupaten_all():
     
     inv_stages = sort_stage_names(inv_stages_raw)
     
-    cursor.execute("""
+    cursor.execute(f"""
         SELECT UPPER(TRIM(COALESCE(vr.kabupaten_kota, ''))) as kab, COUNT(*) as cnt
         FROM verified_records vr
         JOIN verified_batches vb ON vb.id = vr.batch_id
-        WHERE vr.status = 'LOLOS' AND vb.is_published = 1
+        JOIN invers_stages s ON s.id = vb.stage_id
+        {prov_s_sql} AND vr.status = 'LOLOS' AND vb.is_published = 1
         GROUP BY kab
-    """)
+    """, params_s)
     lolos_by_kab = {row['kab']: row['cnt'] for row in cursor.fetchall()}
     
     table_data = []
