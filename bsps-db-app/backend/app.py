@@ -2340,6 +2340,251 @@ def get_unmatched_invers(stage_id: int):
     return {"records": unmatched, "total": len(unmatched)}
 
 
+@app.get("/api/stage/{stage_id}/reconciliation/export")
+def export_reconciliation_excel(stage_id: int, error_filter: str = "ALL", active_only: bool = False):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Ambil stage info
+    cursor.execute("SELECT * FROM invers_stages WHERE id = ?", (stage_id,))
+    stage = cursor.fetchone()
+    if not stage:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Tahap tidak ditemukan")
+    stage_name = stage['name']
+    conn.close()
+    
+    # Gunakan get_stage_records untuk mendapatkan analisis mismatch yang sama persis
+    stage_data = get_stage_records(stage_id)
+    verified = stage_data.get("verified_records", [])
+    
+    # Filter mismatch records
+    mismatches = [r for r in verified if r.get('has_error') or r.get('is_mismatch')]
+    
+    if active_only:
+        mismatches = [r for r in mismatches if not r.get('override')]
+
+    if error_filter != "ALL":
+        mismatches = [r for r in mismatches if r.get('mismatch_type') == error_filter]
+
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    import io
+    from fastapi.responses import StreamingResponse
+    from datetime import datetime
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Penyandingan Data Mismatch"
+    ws.views.sheetView[0].showGridLines = True
+
+    # Palette Warna
+    f_title = Font(name="Bookman Old Style", size=14, bold=True, color="1B4332")
+    f_subtitle = Font(name="Bookman Old Style", size=10, italic=True, color="475569")
+    f_grp_header = Font(name="Bookman Old Style", size=10, bold=True, color="FFFFFF")
+    f_field_label = Font(name="Bookman Old Style", size=9, bold=True, color="1E293B")
+    f_data = Font(name="Bookman Old Style", size=9, color="000000")
+    f_data_bold = Font(name="Bookman Old Style", size=9, bold=True, color="000000")
+    f_status_val = Font(name="Bookman Old Style", size=8.5, color="334155")
+
+    fill_grp_num = PatternFill(start_color="475569", end_color="475569", fill_type="solid") # Slate
+    fill_grp_label = PatternFill(start_color="64748B", end_color="64748B", fill_type="solid") # Slate Light
+    fill_grp_invers = PatternFill(start_color="1B4332", end_color="1B4332", fill_type="solid") # Dark Green
+    fill_grp_verified = PatternFill(start_color="7F1D1D", end_color="7F1D1D", fill_type="solid") # Dark Red
+    fill_grp_status = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid") # Dark Blue
+
+    fill_block_header = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid") # Light Grey
+    fill_mismatch = PatternFill(start_color="FEE2E2", end_color="FEE2E2", fill_type="solid") # Soft Red
+    fill_status_bg = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid") # Soft White
+
+    border_thin = Border(
+        left=Side(style='thin', color='CBD5E1'),
+        right=Side(style='thin', color='CBD5E1'),
+        top=Side(style='thin', color='CBD5E1'),
+        bottom=Side(style='thin', color='CBD5E1')
+    )
+    
+    border_block_bottom = Border(
+        left=Side(style='thin', color='CBD5E1'),
+        right=Side(style='thin', color='CBD5E1'),
+        top=Side(style='thin', color='CBD5E1'),
+        bottom=Side(style='medium', color='475569')
+    )
+
+    align_center = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    align_left = Alignment(horizontal='left', vertical='center', wrap_text=True)
+
+    # Title section
+    status_filter_label = "KASUS AKTIF SAJA (BELUM REKONSILIASI)" if active_only else "SEMUA KASUS"
+    ws.cell(row=1, column=1, value=f"LAPORAN PENYANDINGAN DATA MISMATCH ({status_filter_label})").font = f_title
+    ws.cell(row=2, column=1, value=f"Tahap: {stage_name.upper()} | Filter Status: {status_filter_label} | Kategori: {error_filter} | Total Kasus: {len(mismatches)} | Tanggal Ekspor: {datetime.now().strftime('%d-%m-%Y %H:%M')}").font = f_subtitle
+
+    # Merge title headers
+    ws.merge_cells("A1:E1")
+    ws.merge_cells("A2:E2")
+
+    # Header Row 4: Column Headers
+    ws.cell(row=4, column=1, value="NO.").font = f_grp_header
+    ws.cell(row=4, column=1).fill = fill_grp_num
+    ws.cell(row=4, column=1).alignment = align_center
+
+    ws.cell(row=4, column=2, value="ELEMEN DATA").font = f_grp_header
+    ws.cell(row=4, column=2).fill = fill_grp_label
+    ws.cell(row=4, column=2).alignment = align_center
+
+    ws.cell(row=4, column=3, value="DATA RUJUKAN (FILE AWAL INVERS)").font = f_grp_header
+    ws.cell(row=4, column=3).fill = fill_grp_invers
+    ws.cell(row=4, column=3).alignment = align_center
+
+    ws.cell(row=4, column=4, value="DATA LAPANGAN (FILE HASIL VERIFIKASI)").font = f_grp_header
+    ws.cell(row=4, column=4).fill = fill_grp_verified
+    ws.cell(row=4, column=4).alignment = align_center
+
+    ws.cell(row=4, column=5, value="INFORMASI ERROR & STATUS REKONSILIASI").font = f_grp_header
+    ws.cell(row=4, column=5).fill = fill_grp_status
+    ws.cell(row=4, column=5).alignment = align_center
+
+    ws.row_dimensions[4].height = 28
+
+    # Data Blocks (6 Rows per CPB Mismatch)
+    current_row = 5
+    for idx, r in enumerate(mismatches):
+        exp = r.get('expected_invers') or {}
+        override = r.get('override')
+        
+        m_type = r.get('mismatch_type')
+        m_label = (
+            "Duplikat Data" if m_type == "DUPLICATE" else
+            "Mismat Nama CPB" if m_type == "NAMA_MISMATCH" else
+            "Mismat No. KK" if m_type == "KK_MISMATCH" else
+            "Mismat NIK CPB" if m_type == "NIK_MISMATCH" else
+            "NIK Tidak Ada di INVERS" if m_type == "MISSING_IN_INVERS" else
+            "Format NIK Salah" if m_type == "NIK_INVALID" else
+            "Format KK Salah" if m_type == "KK_INVALID" else
+            "NIK & KK Identik" if m_type == "NIK_KK_IDENTICAL" else "Perbedaan Karakter"
+        )
+        
+        status_recon = "Belum Selesai (Butuh Tindakan)"
+        if override:
+            status_recon = "Resolved (Terima Lapangan)" if override.get('override_type') == "ACCEPT_VERIFIED" else "Resolved (Edit Manual)"
+            
+        catatan = "; ".join(r.get('errors', [])) if r.get('errors') else "-"
+
+        # Block Range: current_row to current_row + 5
+        start_r = current_row
+        end_r = current_row + 5
+
+        # Merge No Column (Col A)
+        ws.merge_cells(start_row=start_r, start_column=1, end_row=end_r, end_column=1)
+        no_cell = ws.cell(row=start_r, column=1, value=idx + 1)
+        no_cell.font = Font(name="Bookman Old Style", size=12, bold=True, color="1E293B")
+        no_cell.alignment = align_center
+
+        # Merge Status Column (Col E)
+        ws.merge_cells(start_row=start_r, start_column=5, end_row=end_r, end_column=5)
+        status_text = (
+            f"KASUS ERROR:\n{m_label}\n\n"
+            f"BERITA ACARA / BATCH:\n{r.get('batch_name') or '-'}\n\n"
+            f"STATUS REKONSILIASI:\n{status_recon}\n\n"
+            f"CATATAN / DIAGNOSA:\n{catatan}"
+        )
+        status_cell = ws.cell(row=start_r, column=5, value=status_text)
+        status_cell.font = f_status_val
+        status_cell.alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
+
+        # Apply borders & background for merged Col A and Col E cells
+        for r_idx in range(start_r, end_r + 1):
+            cell_a = ws.cell(row=r_idx, column=1)
+            cell_e = ws.cell(row=r_idx, column=5)
+            b_style = border_block_bottom if r_idx == end_r else border_thin
+            cell_a.border = b_style
+            cell_e.border = b_style
+            cell_e.fill = fill_status_bg
+
+        # Rows Data setup
+        field_rows = [
+            ("Nama CPB", exp.get('nama') or "-", r.get('nama') or "-"),
+            ("NIK (No. KTP)", f"'{exp.get('no_ktp')}" if exp.get('no_ktp') else "-", f"'{r.get('no_ktp')}" if r.get('no_ktp') else "-"),
+            ("No. KK", f"'{exp.get('no_kk')}" if exp.get('no_kk') else "-", f"'{r.get('no_kk')}" if r.get('no_kk') else "-"),
+            ("Kabupaten / Kota", exp.get('kabupaten_kota') or "-", r.get('kabupaten_kota') or "-"),
+            ("Kecamatan", exp.get('kecamatan') or "-", r.get('kecamatan') or "-"),
+            ("Desa / Kelurahan", exp.get('desa_kelurahan') or "-", r.get('desa_kelurahan') or "-")
+        ]
+
+        for i, (field_lbl, inv_val, ver_val) in enumerate(field_rows):
+            r_curr = start_r + i
+            b_style = border_block_bottom if r_curr == end_r else border_thin
+
+            # Col B: Field Label
+            cell_b = ws.cell(row=r_curr, column=2, value=field_lbl)
+            cell_b.font = f_field_label
+            cell_b.border = b_style
+            cell_b.alignment = align_left
+            if i == 0:
+                cell_b.fill = fill_block_header
+
+            # Col C: INVERS Value
+            cell_c = ws.cell(row=r_curr, column=3, value=inv_val)
+            cell_c.font = f_data_bold if i == 0 else f_data
+            cell_c.border = b_style
+            cell_c.alignment = align_center if i in [1, 2] else align_left
+            if i in [1, 2]:
+                cell_c.number_format = '@'
+            if i == 0:
+                cell_c.fill = fill_block_header
+
+            # Col D: VERIFIED Value
+            cell_d = ws.cell(row=r_curr, column=4, value=ver_val)
+            cell_d.font = f_data_bold if i == 0 else f_data
+            cell_d.border = b_style
+            cell_d.alignment = align_center if i in [1, 2] else align_left
+            if i in [1, 2]:
+                cell_d.number_format = '@'
+            if i == 0:
+                cell_d.fill = fill_block_header
+
+            # Mismatch highlight
+            if exp:
+                if i == 0 and exp.get('nama', '').strip().upper() != r.get('nama', '').strip().upper():
+                    cell_d.fill = fill_mismatch
+                    cell_d.font = f_data_bold
+                elif i == 1 and exp.get('no_ktp', '').strip() != r.get('no_ktp', '').strip():
+                    cell_d.fill = fill_mismatch
+                    cell_d.font = f_data_bold
+                elif i == 2 and exp.get('no_kk', '').strip() != r.get('no_kk', '').strip():
+                    cell_d.fill = fill_mismatch
+                    cell_d.font = f_data_bold
+
+            ws.row_dimensions[r_curr].height = 22
+
+        current_row = end_r + 1
+
+    # Widths
+    col_widths = {
+        'A': 7,
+        'B': 22,
+        'C': 34,
+        'D': 34,
+        'E': 42
+    }
+    for col_let, width in col_widths.items():
+        ws.column_dimensions[col_let].width = width
+
+    ws.freeze_panes = "A5"
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    file_type_str = "KASUS_AKTIF" if active_only else "SEMUA_KASUS"
+    filename = f"PENYANDINGAN_DATA_{file_type_str}_{stage_name.upper().replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
 @app.get("/api/reconciliation/unmatched-verified/{stage_id}")
 def get_unmatched_verified(stage_id: int):
     """Ambil verified records yang belum dipasangkan dengan invers record manapun."""
@@ -2756,8 +3001,9 @@ def get_kabupaten_pengusul_tree(stage_id: int):
 
 # --- REKAP KESELURUHAN (All stages, per kabupaten) ---
 @app.get("/api/rekap-keseluruhan/export")
-def export_rekap_keseluruhan():
+def export_rekap_keseluruhan(pengusul: str = ""):
     import re
+    pengusul_list = [p.strip() for p in pengusul.split(",") if p.strip()]
     conn = get_db_connection()
     cursor = conn.cursor()
     
@@ -2769,6 +3015,13 @@ def export_rekap_keseluruhan():
     all_stages = sorted(all_stages, key=get_stage_num)
     
     published_filter = "AND vb.is_published = 1"
+    
+    pengusul_clause = ""
+    pengusul_params = ()
+    if pengusul_list:
+        ph = ",".join("?" for _ in pengusul_list)
+        pengusul_clause = f"UPPER(COALESCE(ir_p.pengusul, '')) IN ({ph})"
+        pengusul_params = tuple(p.upper() for p in pengusul_list)
     
     cursor.execute(f"""
         SELECT DISTINCT UPPER(TRIM(COALESCE(kabupaten_kota, ''))) as kab 
@@ -2786,20 +3039,31 @@ def export_rekap_keseluruhan():
     """)
     all_kabupaten = [r['kab'] for r in cursor.fetchall()]
     
-    cursor.execute("""
+    sk_where_extra = ""
+    sk_params = ()
+    if pengusul_list:
+        ph = ",".join("?" for _ in pengusul_list)
+        sk_where_extra = f"AND UPPER(COALESCE(ir_p.pengusul, '')) IN ({ph})"
+        sk_params = tuple(p.upper() for p in pengusul_list)
+    cursor.execute(f"""
         SELECT 
             m.verified_stage_id as stage_id,
             UPPER(TRIM(COALESCE(vr.kabupaten_kota, ''))) as kab,
             COUNT(*) as cnt
         FROM sk_dirjen_matches m
         JOIN verified_records vr ON vr.id = m.verified_record_id
+        LEFT JOIN (
+            SELECT DISTINCT no_ktp, pengusul FROM invers_records
+            WHERE pengusul IS NOT NULL AND pengusul != ''
+        ) ir_p ON ir_p.no_ktp = vr.no_ktp
         WHERE m.verified_stage_id IS NOT NULL
         AND m.verified_record_id IS NOT NULL
         AND (m.match_type = 'PERFECT' 
             OR (m.match_type = 'NEEDS_APPROVAL' AND m.override_status = 'APPROVED')
             OR m.match_type = 'MANUAL_PAIR')
+        {sk_where_extra}
         GROUP BY m.verified_stage_id, kab
-    """)
+    """, sk_params)
     sk_by_stage_kab = {}
     for row in cursor.fetchall():
         sid = row['stage_id']
@@ -2814,23 +3078,49 @@ def export_rekap_keseluruhan():
         stage_id = stage['id']
         stage_name = stage['name']
         
-        cursor.execute("""
-            SELECT ir.no_ktp, UPPER(TRIM(COALESCE(ir.kabupaten_kota, ''))) as kab
-            FROM invers_records ir
-            JOIN invers_revisions irv ON ir.revision_id = irv.id
-            WHERE irv.stage_id = ? AND irv.is_active = 1
-        """, (stage_id,))
-        invers_recs = [dict(r) for r in cursor.fetchall()]
-        
-        cursor.execute(f"""
-            SELECT vr.no_ktp, vr.status, UPPER(TRIM(COALESCE(vr.kabupaten_kota, ''))) as kab
-            FROM verified_records vr
-            JOIN verified_batches vb ON vr.batch_id = vb.id
-            LEFT JOIN reconciliation_overrides ro ON ro.original_no_ktp = vr.no_ktp AND ro.stage_id = vb.stage_id
-            WHERE vb.stage_id = ? AND (vr.is_duplicate_in_previous = 0 OR ro.id IS NOT NULL)
-            {published_filter}
-        """, (stage_id,))
-        verified_recs = [dict(r) for r in cursor.fetchall()]
+        if pengusul_list:
+            invers_clause = f"UPPER(COALESCE(ir.pengusul, '')) IN ({','.join('?' for _ in pengusul_list)})"
+            cursor.execute(f"""
+                SELECT ir.no_ktp, UPPER(TRIM(COALESCE(ir.kabupaten_kota, ''))) as kab
+                FROM invers_records ir
+                JOIN invers_revisions irv ON ir.revision_id = irv.id
+                WHERE irv.stage_id = ? AND irv.is_active = 1
+                AND {invers_clause}
+            """, (stage_id, *pengusul_params))
+            invers_recs = [dict(r) for r in cursor.fetchall()]
+
+            verif_query = f"""
+                SELECT vr.no_ktp, vr.status, UPPER(TRIM(COALESCE(vr.kabupaten_kota, ''))) as kab
+                FROM verified_records vr
+                JOIN verified_batches vb ON vr.batch_id = vb.id
+                LEFT JOIN reconciliation_overrides ro ON ro.original_no_ktp = vr.no_ktp AND ro.stage_id = vb.stage_id
+                LEFT JOIN (
+                    SELECT DISTINCT no_ktp, pengusul FROM invers_records
+                    WHERE pengusul IS NOT NULL AND pengusul != ''
+                ) ir_p ON ir_p.no_ktp = vr.no_ktp
+                WHERE vb.stage_id = ? AND (vr.is_duplicate_in_previous = 0 OR ro.id IS NOT NULL)
+                AND {pengusul_clause}
+                {published_filter}
+            """
+            cursor.execute(verif_query, (stage_id, *pengusul_params))
+            verified_recs = [dict(r) for r in cursor.fetchall()]
+        else:
+            cursor.execute("""
+                SELECT ir.no_ktp, UPPER(TRIM(COALESCE(ir.kabupaten_kota, ''))) as kab
+                FROM invers_records ir
+                JOIN invers_revisions irv ON ir.revision_id = irv.id
+                WHERE irv.stage_id = ? AND irv.is_active = 1
+            """, (stage_id,))
+            invers_recs = [dict(r) for r in cursor.fetchall()]
+            cursor.execute(f"""
+                SELECT vr.no_ktp, vr.status, UPPER(TRIM(COALESCE(vr.kabupaten_kota, ''))) as kab
+                FROM verified_records vr
+                JOIN verified_batches vb ON vr.batch_id = vb.id
+                LEFT JOIN reconciliation_overrides ro ON ro.original_no_ktp = vr.no_ktp AND ro.stage_id = vb.stage_id
+                WHERE vb.stage_id = ? AND (vr.is_duplicate_in_previous = 0 OR ro.id IS NOT NULL)
+                {published_filter}
+            """, (stage_id,))
+            verified_recs = [dict(r) for r in cursor.fetchall()]
         
         alokasi_by_kab = {}
         for ir in invers_recs:
@@ -3130,15 +3420,16 @@ def export_rekap_keseluruhan():
         ws.column_dimensions['B'].width = 28
         ws.freeze_panes = 'C6'
 
+    filter_note = f" (Filter Pengusul: {', '.join(pengusul_list)})" if pengusul_list else ""
     ws_murni = wb.active
     ws_murni.title = "Rekap Invers Murni"
-    build_worksheet(ws_murni, "REKAPITULASI INVERS MURNI", "Sistem Verifikasi Perumahan Swadaya — Tahap Invers Murni", murni_stages)
+    build_worksheet(ws_murni, "REKAPITULASI INVERS MURNI", "Sistem Verifikasi Perumahan Swadaya — Tahap Invers Murni" + filter_note, murni_stages)
 
     ws_pengganti = wb.create_sheet("Rekap Invers Pengganti")
-    build_worksheet(ws_pengganti, "REKAPITULASI INVERS PENGGANTI", "Sistem Verifikasi Perumahan Swadaya — Tahap Invers Pengganti", pengganti_stages)
+    build_worksheet(ws_pengganti, "REKAPITULASI INVERS PENGGANTI", "Sistem Verifikasi Perumahan Swadaya — Tahap Invers Pengganti" + filter_note, pengganti_stages)
 
     ws_keseluruhan = wb.create_sheet("Rekap Keseluruhan")
-    build_worksheet(ws_keseluruhan, "REKAPITULASI KESELURUHAN INVERS", "Sistem Verifikasi Perumahan Swadaya — Semua Tahap", stages_data)
+    build_worksheet(ws_keseluruhan, "REKAPITULASI KESELURUHAN INVERS", "Sistem Verifikasi Perumahan Swadaya — Semua Tahap" + filter_note, stages_data)
 
     file_stream = io.BytesIO()
     wb.save(file_stream)
@@ -3154,8 +3445,9 @@ def export_rekap_keseluruhan():
 REKAP_CACHE = {}
 
 @app.get("/api/rekap-keseluruhan")
-def get_rekap_keseluruhan(published_only: int = 0):
-    cache_key = f"rekap_{published_only}"
+def get_rekap_keseluruhan(published_only: int = 0, pengusul: str = ""):
+    pengusul_list = [p.strip() for p in pengusul.split(",") if p.strip()]
+    cache_key = f"rekap_{published_only}_{','.join(sorted(pengusul_list))}"
     now = time.time()
     if cache_key in REKAP_CACHE:
         ts, cached_data = REKAP_CACHE[cache_key]
@@ -3173,6 +3465,16 @@ def get_rekap_keseluruhan(published_only: int = 0):
         match = re.search(r'\d+', s['name'])
         return int(match.group()) if match else 999
     all_stages = sorted(all_stages, key=get_stage_num)
+    
+    # Distinct list of pengusul options for the filter UI (from active invers records)
+    cursor.execute("""
+        SELECT DISTINCT UPPER(TRIM(COALESCE(ir.pengusul, ''))) as pengusul
+        FROM invers_records ir
+        JOIN invers_revisions irv ON ir.revision_id = irv.id
+        WHERE irv.is_active = 1 AND TRIM(COALESCE(ir.pengusul, '')) != ''
+        ORDER BY pengusul ASC
+    """)
+    pengusul_options = [r['pengusul'] for r in cursor.fetchall()]
     
     published_filter = "AND vb.is_published = 1" if published_only else ""
     
@@ -3194,20 +3496,31 @@ def get_rekap_keseluruhan(published_only: int = 0):
     all_kabupaten = [r['kab'] for r in cursor.fetchall()]
     
     # Pre-fetch SK Dirjen match counts per stage per kabupaten
-    cursor.execute("""
+    sk_where_extra = ""
+    sk_params = ()
+    if pengusul_list:
+        ph = ",".join("?" for _ in pengusul_list)
+        sk_where_extra = f"AND UPPER(COALESCE(ir_p.pengusul, '')) IN ({ph})"
+        sk_params = tuple(p.upper() for p in pengusul_list)
+    cursor.execute(f"""
         SELECT 
             m.verified_stage_id as stage_id,
             UPPER(TRIM(COALESCE(vr.kabupaten_kota, ''))) as kab,
             COUNT(*) as cnt
         FROM sk_dirjen_matches m
         JOIN verified_records vr ON vr.id = m.verified_record_id
+        LEFT JOIN (
+            SELECT DISTINCT no_ktp, pengusul FROM invers_records
+            WHERE pengusul IS NOT NULL AND pengusul != ''
+        ) ir_p ON ir_p.no_ktp = vr.no_ktp
         WHERE m.verified_stage_id IS NOT NULL
         AND m.verified_record_id IS NOT NULL
         AND (m.match_type = 'PERFECT' 
             OR (m.match_type = 'NEEDS_APPROVAL' AND m.override_status = 'APPROVED')
             OR m.match_type = 'MANUAL_PAIR')
+        {sk_where_extra}
         GROUP BY m.verified_stage_id, kab
-    """)
+    """, sk_params)
     sk_by_stage_kab = {}
     for row in cursor.fetchall():
         sid = row['stage_id']
@@ -3217,13 +3530,20 @@ def get_rekap_keseluruhan(published_only: int = 0):
         sk_by_stage_kab[sid][kab] = row['cnt']
 
     # SQL Aggregation for ALL stages (Invers Alokasi)
-    cursor.execute("""
+    alokasi_where = ""
+    alokasi_params = ()
+    if pengusul_list:
+        ph = ",".join("?" for _ in pengusul_list)
+        alokasi_where = f"AND UPPER(COALESCE(ir.pengusul, '')) IN ({ph})"
+        alokasi_params = tuple(p.upper() for p in pengusul_list)
+    cursor.execute(f"""
         SELECT irv.stage_id, UPPER(TRIM(COALESCE(ir.kabupaten_kota, ''))) as kab, COUNT(*) as cnt
         FROM invers_records ir
         JOIN invers_revisions irv ON ir.revision_id = irv.id
         WHERE irv.is_active = 1 AND TRIM(COALESCE(ir.kabupaten_kota, '')) != ''
+        {alokasi_where}
         GROUP BY irv.stage_id, kab
-    """)
+    """, alokasi_params)
     alokasi_map = {}
     for row in cursor.fetchall():
         sid, kab, cnt = row['stage_id'], row['kab'], row['cnt']
@@ -3231,15 +3551,26 @@ def get_rekap_keseluruhan(published_only: int = 0):
         alokasi_map[sid][kab] = cnt
 
     # SQL Aggregation for ALL stages (Verified Records Lolos & Tidak Lolos)
+    verif_where = ""
+    verif_params = ()
+    if pengusul_list:
+        ph = ",".join("?" for _ in pengusul_list)
+        verif_where = f"AND UPPER(COALESCE(ir_p.pengusul, '')) IN ({ph})"
+        verif_params = tuple(p.upper() for p in pengusul_list)
     cursor.execute(f"""
         SELECT vb.stage_id, UPPER(TRIM(COALESCE(vr.kabupaten_kota, ''))) as kab, vr.status, COUNT(*) as cnt
         FROM verified_records vr
         JOIN verified_batches vb ON vr.batch_id = vb.id
         LEFT JOIN reconciliation_overrides ro ON ro.original_no_ktp = vr.no_ktp AND ro.stage_id = vb.stage_id
+        LEFT JOIN (
+            SELECT DISTINCT no_ktp, pengusul FROM invers_records
+            WHERE pengusul IS NOT NULL AND pengusul != ''
+        ) ir_p ON ir_p.no_ktp = vr.no_ktp
         WHERE (vr.is_duplicate_in_previous = 0 OR ro.id IS NOT NULL) AND TRIM(COALESCE(vr.kabupaten_kota, '')) != ''
+        {verif_where}
         {published_filter}
         GROUP BY vb.stage_id, kab, vr.status
-    """)
+    """, verif_params)
     verif_map = {}
     for row in cursor.fetchall():
         sid, kab, st, cnt = row['stage_id'], row['kab'], row['status'], row['cnt']
@@ -3320,7 +3651,8 @@ def get_rekap_keseluruhan(published_only: int = 0):
     
     result = {
         "all_kabupaten": all_kabupaten,
-        "stages": stages_data
+        "stages": stages_data,
+        "pengusul_options": pengusul_options
     }
     REKAP_CACHE[cache_key] = (now, result)
     return result

@@ -211,6 +211,56 @@ function TreeNode({ node, level = 0, columns = 7, onNavigate, parentPengusul }) 
   );
 }
 
+// Multi-select checkbox dropdown for filtering rekap by Pengusul
+function RekapPengusulFilter({ options, selected, onToggle, onClearAll, onSelectAll, dropdownOpen, setDropdownOpen }) {
+  const selectedLabel = selected.length === 0
+    ? 'Semua Pengusul'
+    : `${selected.length} Pengusul Terpilih`;
+  return (
+    <div className="rekap-pengusul-filter">
+      <button
+        type="button"
+        className="btn btn-secondary btn-sm"
+        onClick={() => setDropdownOpen(!dropdownOpen)}
+        style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: '600' }}
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"></path></svg>
+        Pengusul
+        <span style={{
+          background: selected.length > 0 ? 'var(--primary)' : 'var(--text-muted)',
+          color: '#fff', borderRadius: '10px', padding: '0 7px', fontSize: '0.72rem', fontWeight: '700'
+        }}>{selected.length > 0 ? selected.length : 'Semua'}</span>
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: dropdownOpen ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }}><polyline points="6 9 12 15 18 9"></polyline></svg>
+      </button>
+      {dropdownOpen && (
+        <div className="rekap-pengusul-dropdown">
+          <div className="rekap-pengusul-dropdown-actions">
+            <button type="button" onClick={onSelectAll}>Pilih Semua</button>
+            <button type="button" onClick={onClearAll}>Bersihkan</button>
+          </div>
+          <div className="rekap-pengusul-dropdown-list">
+            {options.length === 0 && (
+              <div style={{ padding: '8px 10px', color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '0.8rem' }}>
+                Tidak ada data pengusul.
+              </div>
+            )}
+            {options.map((opt) => (
+              <label key={opt} className="rekap-pengusul-option">
+                <input
+                  type="checkbox"
+                  checked={selected.includes(opt)}
+                  onChange={() => onToggle(opt)}
+                />
+                <span>{opt}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function App() {
   const getSortedStages = () => {
     return [...stages].sort((a, b) => {
@@ -434,6 +484,15 @@ function App() {
       showToast(err.message || 'Terjadi kesalahan saat pembaruan status massal', 'error');
     }
   };
+
+  const handleExportReconciliation = (activeOnly = false) => {
+    if (!selectedStageId) {
+      showToast('Pilih tahap terlebih dahulu', 'error');
+      return;
+    }
+    const url = `${BACKEND_URL}/api/stage/${selectedStageId}/reconciliation/export?error_filter=${encodeURIComponent(errorFilter)}&active_only=${activeOnly ? 'true' : 'false'}`;
+    window.open(url, '_blank');
+  };
   
   // Dashboard & Rekap Center Data
   const [overviewStats, setOverviewStats] = useState(null);
@@ -455,6 +514,8 @@ function App() {
   const [inversKabFilter, setInversKabFilter] = useState('ALL');
   const [inversDesaFilter, setInversDesaFilter] = useState('ALL');
   const [inversStatusFilter, setInversStatusFilter] = useState('ALL');
+  const [inversPengusulFilter, setInversPengusulFilter] = useState([]);
+  const [inversPengusulDropdownOpen, setInversPengusulDropdownOpen] = useState(false);
   
   // State Filter Tabel Terverifikasi
   const [verifiedKabFilter, setVerifiedKabFilter] = useState('ALL');
@@ -581,6 +642,10 @@ function App() {
   const [rekapData, setRekapData] = useState(null);
   const [rekapUnggahanData, setRekapUnggahanData] = useState(null);
   const [rekapLoading, setRekapLoading] = useState(false);
+
+  // State Filter Pengusul pada Rekap (multi-select)
+  const [rekapPengusulFilter, setRekapPengusulFilter] = useState([]);
+  const [rekapPengusulDropdownOpen, setRekapPengusulDropdownOpen] = useState(false);
 
   // State Rekap Batch Berita Acara
   const [rekapBatchData, setRekapBatchData] = useState(null);
@@ -929,7 +994,9 @@ function App() {
   const fetchRekapKeseluruhan = async () => {
     setRekapLoading(true);
     try {
-      const res = await fetch(`${BACKEND_URL}/api/rekap-keseluruhan?published_only=1`);
+      const params = new URLSearchParams({ published_only: '1' });
+      if (rekapPengusulFilter.length > 0) params.set('pengusul', rekapPengusulFilter.join(','));
+      const res = await fetch(`${BACKEND_URL}/api/rekap-keseluruhan?${params}`);
       if (!res.ok) throw new Error("Gagal mengambil data rekap keseluruhan");
       const data = await res.json();
       setRekapData(data);
@@ -943,7 +1010,9 @@ function App() {
   const fetchRekapUnggahan = async () => {
     setRekapLoading(true);
     try {
-      const res = await fetch(`${BACKEND_URL}/api/rekap-keseluruhan`);
+      const params = new URLSearchParams();
+      if (rekapPengusulFilter.length > 0) params.set('pengusul', rekapPengusulFilter.join(','));
+      const res = await fetch(`${BACKEND_URL}/api/rekap-keseluruhan?${params}`);
       if (!res.ok) throw new Error("Gagal mengambil data rekap unggahan");
       const data = await res.json();
       setRekapUnggahanData(data);
@@ -966,6 +1035,46 @@ function App() {
     } finally {
       setRekapBatchLoading(false);
     }
+  };
+
+  // Re-fetch rekap (keseluruhan & unggahan) ketika filter pengusul berubah
+  useEffect(() => {
+    if (activeTab === 'rekap') {
+      fetchRekapKeseluruhan();
+    } else if (activeTab === 'rekap-unggahan') {
+      fetchRekapUnggahan();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rekapPengusulFilter]);
+
+  const toggleRekapPengusul = (name) => {
+    setRekapPengusulFilter(prev =>
+      prev.includes(name) ? prev.filter(p => p !== name) : [...prev, name]
+    );
+  };
+
+  const clearRekapPengusul = () => setRekapPengusulFilter([]);
+
+  const selectAllRekapPengusul = () => {
+    const options = rekapData?.pengusul_options || [];
+    setRekapPengusulFilter(prev =>
+      prev.length === options.length && options.length > 0 ? [] : [...options]
+    );
+  };
+
+  const toggleInversPengusul = (name) => {
+    setInversPengusulFilter(prev =>
+      prev.includes(name) ? prev.filter(p => p !== name) : [...prev, name]
+    );
+    setInversPage(1);
+  };
+
+  const clearInversPengusul = () => setInversPengusulFilter([]);
+
+  const selectAllInversPengusul = () => {
+    setInversPengusulFilter(prev =>
+      prev.length === uniqueInversPengusul.length && uniqueInversPengusul.length > 0 ? [] : [...uniqueInversPengusul]
+    );
   };
 
   // Navigate to Global Search with pre-applied filters (used by Rekap table clicks)
@@ -1582,7 +1691,9 @@ function App() {
   };
 
   const handleExportRekapKeseluruhan = () => {
-    window.open(`${BACKEND_URL}/api/rekap-keseluruhan/export`, '_blank');
+    const params = new URLSearchParams();
+    if (rekapPengusulFilter.length > 0) params.set('pengusul', rekapPengusulFilter.join(','));
+    window.open(`${BACKEND_URL}/api/rekap-keseluruhan/export?${params}`, '_blank');
   };
 
   const handleExportRekapBatchBA = () => {
@@ -2190,11 +2301,12 @@ function App() {
         r.no_kk.includes(searchTerm);
       const matchKab = inversKabFilter === 'ALL' || r.kabupaten_kota === inversKabFilter;
       const matchDesa = inversDesaFilter === 'ALL' || r.desa_kelurahan === inversDesaFilter;
+      const matchPengusul = inversPengusulFilter.length === 0 || inversPengusulFilter.includes(r.pengusul || '');
       const isVerified = verifiedNiks.has(r.no_ktp?.trim());
       const matchStatus = inversStatusFilter === 'ALL' ||
         (inversStatusFilter === 'VERIFIED' && isVerified) ||
         (inversStatusFilter === 'NOT_VERIFIED' && !isVerified);
-      return matchSearch && matchKab && matchDesa && matchStatus;
+      return matchSearch && matchKab && matchDesa && matchStatus && matchPengusul;
     });
   };
 
@@ -2271,6 +2383,7 @@ function App() {
   // Unique values untuk filter dropdown INVERS
   const uniqueInversKab = [...new Set((recordsData?.invers_records || []).map(r => r.kabupaten_kota).filter(Boolean))].sort();
   const uniqueInversDesa = [...new Set((recordsData?.invers_records || []).map(r => r.desa_kelurahan).filter(Boolean))].sort();
+  const uniqueInversPengusul = [...new Set((recordsData?.invers_records || []).map(r => r.pengusul).filter(Boolean))].sort();
 
   // Unique values untuk filter dropdown Verified
   const uniqueVerifiedKab = [...new Set((recordsData?.verified_records || []).map(r => r.kabupaten_kota || r.expected_invers?.kabupaten_kota).filter(Boolean))].sort();
@@ -3401,6 +3514,15 @@ function App() {
                   <option value="VERIFIED">Terverifikasi</option>
                   <option value="NOT_VERIFIED">Belum Terverifikasi</option>
                 </select>
+                <RekapPengusulFilter
+                  options={uniqueInversPengusul}
+                  selected={inversPengusulFilter}
+                  onToggle={toggleInversPengusul}
+                  onClearAll={clearInversPengusul}
+                  onSelectAll={selectAllInversPengusul}
+                  dropdownOpen={inversPengusulDropdownOpen}
+                  setDropdownOpen={setInversPengusulDropdownOpen}
+                />
               </div>
             </div>
 
@@ -4005,6 +4127,24 @@ function App() {
                   <option value="KK_INVALID">Format KK Tidak Valid (Bukan 16 Digit)</option>
                   <option value="NIK_KK_IDENTICAL">Format NIK dan KK Bernilai Sama</option>
                 </select>
+                <button 
+                  className="btn btn-primary btn-sm"
+                  onClick={() => handleExportReconciliation(true)}
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: '600' }}
+                  title="Ekspor hanya kasus error yang sedang AKTIF (belum diselesaikan/dikoreksi)"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: "middle" }}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                  Ekspor Kasus Aktif Saja
+                </button>
+                <button 
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => handleExportReconciliation(false)}
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: '600' }}
+                  title="Ekspor seluruh kasus error (termasuk yang sudah diselesaikan)"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: "middle" }}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                  Ekspor Semua Kasus
+                </button>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 {isAdmin && selectedMismatchNiks.size > 0 && (
@@ -4109,7 +4249,7 @@ function App() {
                       </span>
                     ) : (
                       <span style={{ color: 'var(--danger)', fontWeight: '700', fontSize: '0.8rem' }}>
-                        <span style={{ display: "flex", alignItems: "center", gap: "4px" }}><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--danger)" }}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>Belum Selesai (Butuh Tindakan)</span>
+                        <span style={{ display: "flex", alignItems: "center", gap: "4px" }}><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--danger)" }}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>Belum Selesai (Butuh Tindakan)</span>
                       </span>
                     )}
                   </div>
@@ -4134,6 +4274,14 @@ function App() {
                           <div className="recon-val-group">
                             <span className="recon-val-label">No. KK</span>
                             <span className="recon-val-text">{r.expected_invers.no_kk}</span>
+                          </div>
+                          <div className="recon-val-group">
+                            <span className="recon-val-label">Kabupaten / Kota</span>
+                            <span className="recon-val-text">{r.expected_invers.kabupaten_kota || '-'}</span>
+                          </div>
+                          <div className="recon-val-group">
+                            <span className="recon-val-label">Kecamatan</span>
+                            <span className="recon-val-text">{r.expected_invers.kecamatan || '-'}</span>
                           </div>
                           <div className="recon-val-group">
                             <span className="recon-val-label">Desa / Kelurahan</span>
@@ -4170,6 +4318,14 @@ function App() {
                         <span className={`recon-val-text ${r.expected_invers && r.expected_invers.no_kk !== r.no_kk ? 'mismatch' : ''}`}>
                           {r.no_kk}
                         </span>
+                      </div>
+                      <div className="recon-val-group">
+                        <span className="recon-val-label">Kabupaten / Kota</span>
+                        <span className="recon-val-text">{r.kabupaten_kota || '-'}</span>
+                      </div>
+                      <div className="recon-val-group">
+                        <span className="recon-val-label">Kecamatan</span>
+                        <span className="recon-val-text">{r.kecamatan || '-'}</span>
                       </div>
                       <div className="recon-val-group">
                         <span className="recon-val-label">Desa / Kelurahan</span>
@@ -5454,6 +5610,15 @@ function App() {
               </div>
               {!rekapLoading && rekapData && rekapData.stages.length > 0 && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <RekapPengusulFilter
+                    options={rekapData.pengusul_options || []}
+                    selected={rekapPengusulFilter}
+                    onToggle={toggleRekapPengusul}
+                    onClearAll={clearRekapPengusul}
+                    onSelectAll={selectAllRekapPengusul}
+                    dropdownOpen={rekapPengusulDropdownOpen}
+                    setDropdownOpen={setRekapPengusulDropdownOpen}
+                  />
                   <button 
                     className="btn btn-secondary btn-sm"
                     onClick={handleExportRekapKeseluruhan}
@@ -5679,6 +5844,15 @@ function App() {
               </div>
               {!rekapLoading && rekapUnggahanData && rekapUnggahanData.stages.length > 0 && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <RekapPengusulFilter
+                    options={rekapUnggahanData.pengusul_options || []}
+                    selected={rekapPengusulFilter}
+                    onToggle={toggleRekapPengusul}
+                    onClearAll={clearRekapPengusul}
+                    onSelectAll={selectAllRekapPengusul}
+                    dropdownOpen={rekapPengusulDropdownOpen}
+                    setDropdownOpen={setRekapPengusulDropdownOpen}
+                  />
                   <button 
                     className="btn btn-secondary btn-sm"
                     onClick={handleExportRekapKeseluruhan}
