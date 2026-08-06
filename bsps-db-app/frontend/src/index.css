@@ -278,19 +278,19 @@ body {
 /* Dashboard Summary Cards */
 .metrics-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 16px;
 }
 
 .metric-card {
   background-color: var(--bg-card);
   border-radius: var(--border-radius);
-  padding: 24px;
+  padding: 20px;
   border: 1px solid var(--border);
   box-shadow: var(--shadow-sm);
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   position: relative;
   overflow: hidden;
   transition: var(--transition);
@@ -308,6 +308,26 @@ body {
 
 .metric-card.accent-green .metric-title,
 .metric-card.accent-green .metric-subtext {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.metric-card.accent-blue {
+  background-color: #0284c7;
+  color: #ffffff;
+}
+
+.metric-card.accent-blue .metric-title,
+.metric-card.accent-blue .metric-subtext {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.metric-card.accent-amber {
+  background-color: #d97706;
+  color: #ffffff;
+}
+
+.metric-card.accent-amber .metric-title,
+.metric-card.accent-amber .metric-subtext {
   color: rgba(255, 255, 255, 0.85);
 }
 
@@ -493,15 +513,19 @@ body {
 }
 
 .data-table tr {
-  transition: background-color 0.2s ease;
+  transition: background-color 0.15s ease;
 }
 
-.data-table tr:nth-child(even) {
-  background-color: #fcfdfd;
+.data-table tbody tr:nth-child(odd) {
+  background-color: #ffffff;
 }
 
-.data-table tr:hover {
-  background-color: rgba(15, 118, 110, 0.04);
+.data-table tbody tr:nth-child(even) {
+  background-color: #f1f5f9;
+}
+
+.data-table tbody tr:hover {
+  background-color: #e2e8f0;
 }
 
 .data-table tr.row-error {
@@ -1513,6 +1537,11 @@ body {
   color: var(--text-primary);
   padding: 6px 12px;
   white-space: nowrap;
+  min-width: 215px;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
   border-right: 2px solid #bfc6d0;
   border-bottom: 1px solid #eef0f3;
   box-shadow: 2px 0 4px rgba(0,0,0,0.04);
@@ -1545,6 +1574,7 @@ body {
   font-size: 0.82rem;
   color: #1e3a5f;
   padding: 6px 8px;
+  vertical-align: middle;
   border-bottom: 1px solid #eef0f3;
   border-right: 1px solid #e2e8f0;
   box-shadow: 2px 0 4px rgba(0,0,0,0.03);
@@ -1557,13 +1587,56 @@ body {
   box-shadow: 4px 0 8px -2px rgba(0, 0, 0, 0.15) !important;
 }
 
-/* ---- BODY DATA CELLS ---- */
+/* ---- BODY DATA CELLS & ZEBRA STRIPING (LIGHT MODE) ---- */
+:not(.dark) .data-table tbody tr:nth-child(odd),
+:not(.dark) .rekap-table-unified tbody tr:nth-child(odd),
+:not(.dark) .rekap-sk-dirjen-table tbody tr:nth-child(odd),
+:not(.dark) .global-search-table tbody tr:nth-child(odd) {
+  background-color: #ffffff;
+  color: var(--text-main);
+}
+
+:not(.dark) .data-table tbody tr:nth-child(even),
+:not(.dark) .rekap-table-unified tbody tr:nth-child(even),
+:not(.dark) .rekap-sk-dirjen-table tbody tr:nth-child(even),
+:not(.dark) .global-search-table tbody tr:nth-child(even) {
+  background-color: #f1f5f9;
+  color: var(--text-main);
+}
+
+:not(.dark) .data-table tbody tr:hover,
+:not(.dark) .rekap-table-unified tbody tr:hover,
+:not(.dark) .rekap-sk-dirjen-table tbody tr:hover,
+:not(.dark) .global-search-table tbody tr:hover {
+  background-color: #e2e8f0;
+}
+
+/* Sync sticky frozen column backgrounds with zebra striping in Light Mode */
+:not(.dark) .rekap-table-unified tbody tr:nth-child(odd) .rekap-frozen-no,
+:not(.dark) .rekap-table-unified tbody tr:nth-child(odd) .rekap-frozen-kab {
+  background-color: #ffffff !important;
+  color: var(--text-main) !important;
+}
+
+:not(.dark) .rekap-table-unified tbody tr:nth-child(even) .rekap-frozen-no,
+:not(.dark) .rekap-table-unified tbody tr:nth-child(even) .rekap-frozen-kab {
+  background-color: #f1f5f9 !important;
+  color: var(--text-main) !important;
+}
+
+:not(.dark) .rekap-table-unified tbody tr:hover .rekap-frozen-no,
+:not(.dark) .rekap-table-unified tbody tr:hover .rekap-frozen-kab {
+  background-color: #e2e8f0 !important;
+  color: var(--text-main) !important;
+}
+
 .rekap-cell {
   text-align: center;
   padding: 6px 8px;
   font-size: 0.82rem;
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
+  vertical-align: middle;
   border-bottom: 1px solid #eef0f3;
   border-right: 1px solid #eef0f3;
 }
@@ -1591,6 +1664,8 @@ body {
   font-size: 0.82rem;
   color: var(--text-primary);
   padding: 8px 12px;
+  vertical-align: middle !important;
+  line-height: 1.4 !important;
   border-top: 2px solid #bfc6d0 !important;
   border-bottom: none !important;
   border-right: 1px solid #bfc6d0;
@@ -1604,6 +1679,8 @@ body {
   background: #d4e2ee !important;
   color: #1e3a5f !important;
   font-weight: 700 !important;
+  vertical-align: middle !important;
+  line-height: 1.4 !important;
   border-top: 2px solid #9fb2c6 !important;
   border-bottom: none !important;
   box-shadow: 2px -2px 4px rgba(0,0,0,0.06);
@@ -1620,6 +1697,8 @@ body {
   font-size: 0.82rem;
   color: var(--text-primary);
   font-variant-numeric: tabular-nums;
+  vertical-align: middle !important;
+  line-height: 1.4 !important;
   border-top: 2px solid #bfc6d0 !important;
   border-bottom: none !important;
   border-right: 1px solid #eef0f3;
@@ -2331,13 +2410,56 @@ body {
   border-bottom: 1px solid #334155;
 }
 
-.dark .data-table td {
+.dark .data-table td,
+.dark .rekap-table-unified td,
+.dark .rekap-sk-dirjen-table td,
+.dark .global-search-table td {
   border-bottom: 1px solid #334155;
-  color: #e2e8f0;
+  color: #e2e8f0 !important;
 }
 
-.dark .data-table tbody tr:hover {
-  background: rgba(51, 65, 85, 0.3);
+/* Zebra Striping - Dark Mode */
+.dark .data-table tbody tr:nth-child(odd),
+.dark .rekap-table-unified tbody tr:nth-child(odd),
+.dark .rekap-sk-dirjen-table tbody tr:nth-child(odd),
+.dark .global-search-table tbody tr:nth-child(odd) {
+  background-color: #0f172a !important;
+  color: #f1f5f9 !important;
+}
+
+.dark .data-table tbody tr:nth-child(even),
+.dark .rekap-table-unified tbody tr:nth-child(even),
+.dark .rekap-sk-dirjen-table tbody tr:nth-child(even),
+.dark .global-search-table tbody tr:nth-child(even) {
+  background-color: #1e293b !important;
+  color: #f1f5f9 !important;
+}
+
+.dark .data-table tbody tr:hover,
+.dark .rekap-table-unified tbody tr:hover,
+.dark .rekap-sk-dirjen-table tbody tr:hover,
+.dark .global-search-table tbody tr:hover {
+  background-color: #334155 !important;
+  color: #ffffff !important;
+}
+
+/* Sync sticky frozen column backgrounds in Dark Mode */
+.dark .rekap-table-unified tbody tr:nth-child(odd) .rekap-frozen-no,
+.dark .rekap-table-unified tbody tr:nth-child(odd) .rekap-frozen-kab {
+  background-color: #0f172a !important;
+  color: #f1f5f9 !important;
+}
+
+.dark .rekap-table-unified tbody tr:nth-child(even) .rekap-frozen-no,
+.dark .rekap-table-unified tbody tr:nth-child(even) .rekap-frozen-kab {
+  background-color: #1e293b !important;
+  color: #f1f5f9 !important;
+}
+
+.dark .rekap-table-unified tbody tr:hover .rekap-frozen-no,
+.dark .rekap-table-unified tbody tr:hover .rekap-frozen-kab {
+  background-color: #334155 !important;
+  color: #ffffff !important;
 }
 
 .dark .form-input {
@@ -3053,18 +3175,18 @@ body {
   }
 }
 
-/* Rekap Batch BA Table 3-level headers & styling - Custom Palette (#351598, #871131, #C4BEFA) */
+/* Rekap Batch BA Table 3-level headers & styling - Picture 1 Palette (Teal Green, Ocean Blue, Soft Blue-Teal) */
 .rekap-batch-th-level1 {
   position: sticky;
   top: 0;
   z-index: 20;
-  background: #351598;
+  background: #0f766e;
   color: #ffffff;
   font-weight: 700;
   font-size: 0.88rem;
   letter-spacing: 0.8px;
   border-bottom: 1px solid rgba(255,255,255,0.2);
-  border-right: 2px solid #230d67;
+  border-right: 2px solid #0b5e56;
   vertical-align: middle;
   padding: 8px 10px;
   height: 48px;
@@ -3072,22 +3194,22 @@ body {
 }
 
 .dark .rekap-batch-th-level1 {
-  background: #230d67;
+  background: #0b5e56;
   color: #ffffff;
   border-bottom: 1px solid rgba(255,255,255,0.15);
-  border-right: 2px solid #1c0a54;
+  border-right: 2px solid #043e38;
 }
 
 .rekap-batch-th-level2 {
   position: sticky;
   top: 48px;
   z-index: 20;
-  background: #871131;
+  background: #0284c7;
   color: #ffffff;
   font-weight: 700;
   font-size: 0.78rem;
-  border-bottom: 1px solid #6b0c26;
-  border-right: 1px solid #6b0c26;
+  border-bottom: 1px solid #0369a1;
+  border-right: 1px solid #0369a1;
   text-align: center;
   padding: 6px 10px;
   height: 62px;
@@ -3096,10 +3218,10 @@ body {
 }
 
 .dark .rekap-batch-th-level2 {
-  background: #5c0b21;
+  background: #075985;
   color: #ffffff;
-  border-bottom: 1px solid #4a081a;
-  border-right: 1px solid #4a081a;
+  border-bottom: 1px solid #0c4a6e;
+  border-right: 1px solid #0c4a6e;
 }
 
 .rekap-batch-th-level3 {
@@ -3130,23 +3252,23 @@ body {
   top: 0;
   left: 0;
   z-index: 40;
-  background: #C4BEFA;
-  color: #1e1045;
+  background: #e0f2fe;
+  color: #0369a1;
   font-weight: 700;
   font-size: 0.82rem;
   text-align: center;
   padding: 10px 12px;
-  border-bottom: 2px solid #a79ded;
-  border-right: 2px solid #a79ded;
+  border-bottom: 2px solid #bae6fd;
+  border-right: 2px solid #bae6fd;
   vertical-align: middle;
   box-shadow: 2px 2px 4px rgba(0,0,0,0.06);
 }
 
 .dark .rekap-batch-corner {
-  background: #3b3378;
-  color: #f3f0ff;
-  border-bottom: 2px solid #2d2663;
-  border-right: 2px solid #2d2663;
+  background: #1e3a5f;
+  color: #e0f2fe;
+  border-bottom: 2px solid #0f2942;
+  border-right: 2px solid #0f2942;
 }
 
 .rekap-batch-sub-lolos {

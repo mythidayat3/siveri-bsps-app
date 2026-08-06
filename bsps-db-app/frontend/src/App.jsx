@@ -2901,7 +2901,7 @@ function App() {
       <header className="mobile-header-bar">
         <div className="mobile-logo-group">
           <img src={logopkp} alt="Logo PKP" className="mobile-logo-img" />
-          <span className="mobile-logo-text">SIVERI BSPS</span>
+          <span className="mobile-logo-text">E-Bedah Rumah</span>
         </div>
         <button 
           className="mobile-hamburger-btn" 
@@ -2925,7 +2925,7 @@ function App() {
       <aside className={`sidebar ${mobileMenuOpen ? 'mobile-open' : ''}`}>
         <div className="logo-container">
           <img src={logopkp} alt="Logo PKP" className="logo-img" />
-          <span className="logo-text">SIVERI BSPS</span>
+          <span className="logo-text">E-Bedah Rumah</span>
           <button 
             type="button" 
             className="mobile-sidebar-close" 
@@ -3157,7 +3157,7 @@ function App() {
             {darkMode ? 'Mode Terang' : 'Mode Gelap'}
           </button>
           <div style={{ marginTop: '10px', fontSize: '0.72rem', color: '#a7f3d0', textAlign: 'center', fontWeight: '500' }}>
-            Kementerian PUPR - SIVERI BSPS v1.1.0
+            Kementerian PKP - E-Bedah Rumah v1.1.0
           </div>
         </div>
       </aside>
@@ -3288,6 +3288,20 @@ function App() {
                   {recordsData?.invers_records?.length || 0}
                 </span>
                 <span className="metric-subtext">Revisi aktif ke-{stageSummary?.active_revision?.revision_num || 1}</span>
+              </div>
+              <div className="metric-card accent-blue">
+                <span className="metric-title">Total Verifikasi</span>
+                <span className="metric-value">
+                  {(stageSummary?.totals?.lolos || 0) + (stageSummary?.totals?.tidak_lolos || 0)}
+                </span>
+                <span className="metric-subtext">Pengusulan BA (Lolos + Tidak Lolos)</span>
+              </div>
+              <div className="metric-card accent-amber">
+                <span className="metric-title">Belum Diverifikasi</span>
+                <span className="metric-value">
+                  {Math.max(0, (recordsData?.invers_records?.length || 0) - ((stageSummary?.totals?.lolos || 0) + (stageSummary?.totals?.tidak_lolos || 0)))}
+                </span>
+                <span className="metric-subtext">Belum ada BA (INVERS - Total Verifikasi)</span>
               </div>
               <div className="metric-card">
                 <span className="metric-title">Terverifikasi Lolos</span>
