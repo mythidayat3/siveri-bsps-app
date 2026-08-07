@@ -214,7 +214,7 @@ export default function SettingsPanel({ stages, selectedStageId, onDeleteStage, 
             </svg>
             Kelola Password Akun (Kredensial)
           </h3>
-          <p>Ubah password untuk akun Admin (`yayatbalai`) atau Viewer (`balai_sul_3`) sesuai kebutuhan Anda.</p>
+          <p>Ubah password untuk akun Admin (`yayatbalai`, `balaip3kp`) atau Viewer (`balai_sul_3`) sesuai kebutuhan Anda.</p>
 
           <form onSubmit={handlePasswordSubmit} style={{ maxWidth: '400px' }}>
             <div style={{ marginBottom: '12px' }}>
@@ -225,7 +225,8 @@ export default function SettingsPanel({ stages, selectedStageId, onDeleteStage, 
                 style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
               >
                 <option value="balai_sul_3">Viewer (balai_sul_3)</option>
-                <option value="yayatbalai">Admin (yayatbalai)</option>
+                <option value="yayatbalai">Admin 1 (yayatbalai)</option>
+                <option value="balaip3kp">Admin 2 (balaip3kp)</option>
               </select>
             </div>
 

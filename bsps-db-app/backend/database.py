@@ -267,6 +267,11 @@ def init_db():
     )
     """)
 
+    # Seed default accounts if missing
+    cursor.execute("INSERT OR IGNORE INTO users (id, username, password, role) VALUES (1, 'yayatbalai', 'semangat45', 'admin')")
+    cursor.execute("INSERT OR IGNORE INTO users (id, username, password, role) VALUES (2, 'balai_sul_3', 'balaimk5', 'viewer')")
+    cursor.execute("INSERT OR IGNORE INTO users (id, username, password, role) VALUES (3, 'balaip3kp', 'semangat45', 'admin')")
+
     # 13. Village Codes Table (Master Kode Desa / Kelurahan)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS village_codes (
