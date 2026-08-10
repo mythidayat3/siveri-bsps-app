@@ -1142,11 +1142,12 @@ function App() {
   };
 
   // Navigate to Global Search with pre-applied filters (used by Rekap table clicks)
-  const navigateToData = (type, { kab, tahap, status } = {}) => {
+  const navigateToData = (type, { kab, tahap, status, sk_dirjen } = {}) => {
     setActiveTab('global-search');
     setGlobalFilterKab(kab || 'ALL');
     setGlobalFilterTahap(tahap ? String(tahap) : 'ALL');
     setGlobalFilterStatus(status || 'ALL');
+    setGlobalFilterSkDirjen(sk_dirjen || 'ALL');
     if (type === 'verified') setGlobalFilterType('verified');
     else if (type === 'invers') setGlobalFilterType('invers');
     else setGlobalFilterType('all');
@@ -6206,7 +6207,7 @@ function App() {
                               return (
                                 <th 
                                   key={stage.stage_id} 
-                                  colSpan={batchCount * 3} 
+                                  colSpan={batchCount * 5} 
                                   className="rekap-batch-th-level1 rekap-batch-border-stage"
                                 >
                                   {stage.stage_name.toUpperCase()}
@@ -6223,7 +6224,7 @@ function App() {
                                 return (
                                   <th 
                                     key={batch.batch_id} 
-                                    colSpan="3" 
+                                    colSpan="5" 
                                     className={`rekap-batch-th-level2 ${borderClass}`}
                                   >
                                     <div style={{ fontWeight: 700, fontSize: '0.8rem' }}>{batch.batch_name.toUpperCase()}</div>
@@ -6248,7 +6249,9 @@ function App() {
                                   <React.Fragment key={batch.batch_id}>
                                     <th className="rekap-batch-th-level3 rekap-batch-sub-verif">VERIFIKASI</th>
                                     <th className="rekap-batch-th-level3 rekap-batch-sub-lolos">LOLOS</th>
-                                    <th className={`rekap-batch-th-level3 rekap-batch-sub-tidak ${borderClass}`}>TIDAK LOLOS</th>
+                                    <th className="rekap-batch-th-level3 rekap-batch-sub-tidak">TIDAK LOLOS</th>
+                                    <th className="rekap-batch-th-level3 rekap-batch-sub-sk-sudah">SUDAH SK</th>
+                                    <th className={`rekap-batch-th-level3 rekap-batch-sub-sk-belum ${borderClass}`}>BELUM SK</th>
                                   </React.Fragment>
                                 );
                               })
@@ -6275,6 +6278,8 @@ function App() {
                                     const v = kd?.verifikasi || 0;
                                     const l = kd?.lolos || 0;
                                     const tl = kd?.tidak_lolos || 0;
+                                    const sks = kd?.sk_sudah || 0;
+                                    const skb = kd?.sk_belum || 0;
                                     return (
                                       <React.Fragment key={batch.batch_id}>
                                         <td className="rekap-cell rekap-batch-cell-verif">
@@ -6291,10 +6296,24 @@ function App() {
                                             </button>
                                           ) : '-'}
                                         </td>
-                                        <td className={`rekap-cell rekap-batch-cell-tidak ${borderClass}`}>
+                                        <td className="rekap-cell rekap-batch-cell-tidak">
                                           {tl > 0 ? (
                                             <button className="rekap-link" onClick={() => navigateToData('verified', { kab, tahap: stage.stage_id, status: 'TIDAK_LOLOS' })}>
                                               {tl}
+                                            </button>
+                                          ) : '-'}
+                                        </td>
+                                        <td className="rekap-cell rekap-batch-cell-sk-sudah">
+                                          {sks > 0 ? (
+                                            <button className="rekap-link" onClick={() => navigateToData('verified', { kab, tahap: stage.stage_id, status: 'LOLOS', sk_dirjen: 'SUDAH' })}>
+                                              {sks}
+                                            </button>
+                                          ) : '-'}
+                                        </td>
+                                        <td className={`rekap-cell rekap-batch-cell-sk-belum ${borderClass}`}>
+                                          {skb > 0 ? (
+                                            <button className="rekap-link" onClick={() => navigateToData('verified', { kab, tahap: stage.stage_id, status: 'LOLOS', sk_dirjen: 'BELUM' })}>
+                                              {skb}
                                             </button>
                                           ) : '-'}
                                         </td>
@@ -6327,9 +6346,19 @@ function App() {
                                         <button className="rekap-link" onClick={() => navigateToData('verified', { tahap: stage.stage_id, status: 'LOLOS' })}>{t.lolos}</button>
                                       ) : 0}
                                     </td>
-                                    <td className={`rekap-footer-cell rekap-batch-cell-tidak ${borderClass}`}>
+                                    <td className="rekap-footer-cell rekap-batch-cell-tidak">
                                       {t.tidak_lolos > 0 ? (
                                         <button className="rekap-link" onClick={() => navigateToData('verified', { tahap: stage.stage_id, status: 'TIDAK_LOLOS' })}>{t.tidak_lolos}</button>
+                                      ) : 0}
+                                    </td>
+                                    <td className="rekap-footer-cell rekap-batch-cell-sk-sudah">
+                                      {t.sk_sudah > 0 ? (
+                                        <button className="rekap-link" onClick={() => navigateToData('verified', { tahap: stage.stage_id, status: 'LOLOS', sk_dirjen: 'SUDAH' })}>{t.sk_sudah}</button>
+                                      ) : 0}
+                                    </td>
+                                    <td className={`rekap-footer-cell rekap-batch-cell-sk-belum ${borderClass}`}>
+                                      {t.sk_belum > 0 ? (
+                                        <button className="rekap-link" onClick={() => navigateToData('verified', { tahap: stage.stage_id, status: 'LOLOS', sk_dirjen: 'BELUM' })}>{t.sk_belum}</button>
                                       ) : 0}
                                     </td>
                                   </React.Fragment>

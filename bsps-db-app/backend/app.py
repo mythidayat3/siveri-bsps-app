@@ -3767,38 +3767,59 @@ def get_rekap_batch_ba(published_only: int = 1, province_id: int = 1):
             batch_name = batch['name']
             
             cursor.execute("""
-                SELECT UPPER(TRIM(COALESCE(kabupaten_kota, ''))) as kab,
-                       SUM(CASE WHEN status = 'LOLOS' THEN 1 ELSE 0 END) as lolos,
-                       SUM(CASE WHEN status = 'TIDAK LOLOS' THEN 1 ELSE 0 END) as tidak_lolos
-                FROM verified_records
-                WHERE batch_id = ? AND TRIM(COALESCE(kabupaten_kota, '')) != ''
+                SELECT UPPER(TRIM(COALESCE(vr.kabupaten_kota, ''))) as kab,
+                       SUM(CASE WHEN vr.status = 'LOLOS' THEN 1 ELSE 0 END) as lolos,
+                       SUM(CASE WHEN vr.status = 'TIDAK LOLOS' THEN 1 ELSE 0 END) as tidak_lolos,
+                       SUM(CASE WHEN vr.status = 'LOLOS' AND sk.verified_record_id IS NOT NULL THEN 1 ELSE 0 END) as sk_sudah
+                FROM verified_records vr
+                LEFT JOIN (
+                    SELECT DISTINCT verified_record_id 
+                    FROM sk_dirjen_matches 
+                    WHERE verified_record_id IS NOT NULL
+                      AND (match_type = 'PERFECT' 
+                           OR (match_type = 'NEEDS_APPROVAL' AND override_status = 'APPROVED')
+                           OR match_type = 'MANUAL_PAIR')
+                ) sk ON sk.verified_record_id = vr.id
+                WHERE vr.batch_id = ? AND TRIM(COALESCE(vr.kabupaten_kota, '')) != ''
                 GROUP BY kab
             """, (batch_id,))
             
             stats_by_kab = {}
             for row in cursor.fetchall():
+                lolos = row['lolos']
+                tidak_lolos = row['tidak_lolos']
+                sk_sudah = row['sk_sudah']
+                sk_belum = max(0, lolos - sk_sudah)
                 stats_by_kab[row['kab']] = {
-                    "lolos": row['lolos'],
-                    "tidak_lolos": row['tidak_lolos'],
-                    "verifikasi": row['lolos'] + row['tidak_lolos']
+                    "lolos": lolos,
+                    "tidak_lolos": tidak_lolos,
+                    "verifikasi": lolos + tidak_lolos,
+                    "sk_sudah": sk_sudah,
+                    "sk_belum": sk_belum
                 }
             
             kab_data = []
             total_verifikasi = 0
             total_lolos = 0
             total_tidak_lolos = 0
+            total_sk_sudah = 0
+            total_sk_belum = 0
             
             for kab in all_kabupaten:
-                stats = stats_by_kab.get(kab, {"lolos": 0, "tidak_lolos": 0, "verifikasi": 0})
+                stats = stats_by_kab.get(kab, {"lolos": 0, "tidak_lolos": 0, "verifikasi": 0, "sk_sudah": 0, "sk_belum": 0})
                 kab_data.append({
                     "kabupaten": kab,
                     "verifikasi": stats["verifikasi"],
                     "lolos": stats["lolos"],
-                    "tidak_lolos": stats["tidak_lolos"]
+                    "tidak_lolos": stats["tidak_lolos"],
+                    "sk_sudah": stats["sk_sudah"],
+                    "sk_belum": stats["sk_belum"]
                 })
                 total_verifikasi += stats["verifikasi"]
                 total_lolos += stats["lolos"]
                 total_tidak_lolos += stats["tidak_lolos"]
+                total_sk_sudah += stats["sk_sudah"]
+                total_sk_belum += stats["sk_belum"]
                 
             batches_data.append({
                 "batch_id": batch_id,
@@ -3810,7 +3831,9 @@ def get_rekap_batch_ba(published_only: int = 1, province_id: int = 1):
                 "totals": {
                     "verifikasi": total_verifikasi,
                     "lolos": total_lolos,
-                    "tidak_lolos": total_tidak_lolos
+                    "tidak_lolos": total_tidak_lolos,
+                    "sk_sudah": total_sk_sudah,
+                    "sk_belum": total_sk_belum
                 }
             })
             
@@ -3884,36 +3907,57 @@ def export_rekap_batch_ba(published_only: int = 1):
             batch_name = batch['name']
             
             cursor.execute("""
-                SELECT UPPER(TRIM(COALESCE(kabupaten_kota, ''))) as kab,
-                       SUM(CASE WHEN status = 'LOLOS' THEN 1 ELSE 0 END) as lolos,
-                       SUM(CASE WHEN status = 'TIDAK LOLOS' THEN 1 ELSE 0 END) as tidak_lolos
-                FROM verified_records
-                WHERE batch_id = ? AND TRIM(COALESCE(kabupaten_kota, '')) != ''
+                SELECT UPPER(TRIM(COALESCE(vr.kabupaten_kota, ''))) as kab,
+                       SUM(CASE WHEN vr.status = 'LOLOS' THEN 1 ELSE 0 END) as lolos,
+                       SUM(CASE WHEN vr.status = 'TIDAK LOLOS' THEN 1 ELSE 0 END) as tidak_lolos,
+                       SUM(CASE WHEN vr.status = 'LOLOS' AND sk.verified_record_id IS NOT NULL THEN 1 ELSE 0 END) as sk_sudah
+                FROM verified_records vr
+                LEFT JOIN (
+                    SELECT DISTINCT verified_record_id 
+                    FROM sk_dirjen_matches 
+                    WHERE verified_record_id IS NOT NULL
+                      AND (match_type = 'PERFECT' 
+                           OR (match_type = 'NEEDS_APPROVAL' AND override_status = 'APPROVED')
+                           OR match_type = 'MANUAL_PAIR')
+                ) sk ON sk.verified_record_id = vr.id
+                WHERE vr.batch_id = ? AND TRIM(COALESCE(vr.kabupaten_kota, '')) != ''
                 GROUP BY kab
             """, (batch_id,))
             
             stats_by_kab = {}
             for row in cursor.fetchall():
+                lolos = row['lolos']
+                tidak_lolos = row['tidak_lolos']
+                sk_sudah = row['sk_sudah']
+                sk_belum = max(0, lolos - sk_sudah)
                 stats_by_kab[row['kab']] = {
-                    "lolos": row['lolos'],
-                    "tidak_lolos": row['tidak_lolos'],
-                    "verifikasi": row['lolos'] + row['tidak_lolos']
+                    "lolos": lolos,
+                    "tidak_lolos": tidak_lolos,
+                    "verifikasi": lolos + tidak_lolos,
+                    "sk_sudah": sk_sudah,
+                    "sk_belum": sk_belum
                 }
             
             kab_data = {}
             total_verifikasi = 0
             total_lolos = 0
             total_tidak_lolos = 0
+            total_sk_sudah = 0
+            total_sk_belum = 0
             for kab in all_kabupaten:
-                stats = stats_by_kab.get(kab, {"lolos": 0, "tidak_lolos": 0, "verifikasi": 0})
+                stats = stats_by_kab.get(kab, {"lolos": 0, "tidak_lolos": 0, "verifikasi": 0, "sk_sudah": 0, "sk_belum": 0})
                 kab_data[kab] = {
                     "verifikasi": stats["verifikasi"],
                     "lolos": stats["lolos"],
-                    "tidak_lolos": stats["tidak_lolos"]
+                    "tidak_lolos": stats["tidak_lolos"],
+                    "sk_sudah": stats["sk_sudah"],
+                    "sk_belum": stats["sk_belum"]
                 }
                 total_verifikasi += stats["verifikasi"]
                 total_lolos += stats["lolos"]
                 total_tidak_lolos += stats["tidak_lolos"]
+                total_sk_sudah += stats["sk_sudah"]
+                total_sk_belum += stats["sk_belum"]
                 
             batches_data.append({
                 "batch_id": batch_id,
@@ -3924,7 +3968,9 @@ def export_rekap_batch_ba(published_only: int = 1):
                 "totals": {
                     "verifikasi": total_verifikasi,
                     "lolos": total_lolos,
-                    "tidak_lolos": total_tidak_lolos
+                    "tidak_lolos": total_tidak_lolos,
+                    "sk_sudah": total_sk_sudah,
+                    "sk_belum": total_sk_belum
                 }
             })
             
@@ -3960,8 +4006,13 @@ def export_rekap_batch_ba(published_only: int = 1):
     
     fill_lolos_cell = PatternFill(start_color='E8F5E9', end_color='E8F5E9', fill_type='solid')
     fill_tidak_lolos_cell = PatternFill(start_color='FDEDEC', end_color='FDEDEC', fill_type='solid')
+    fill_sk_sudah_cell = PatternFill(start_color='E0F2FE', end_color='E0F2FE', fill_type='solid')
+    fill_sk_belum_cell = PatternFill(start_color='FEF3C7', end_color='FEF3C7', fill_type='solid')
+
     font_lolos_cell = Font(name='Segoe UI', size=9, color='2E7D32')
     font_tidak_lolos_cell = Font(name='Segoe UI', size=9, color='C0392B')
+    font_sk_sudah_cell = Font(name='Segoe UI', size=9, color='0284C7', bold=True)
+    font_sk_belum_cell = Font(name='Segoe UI', size=9, color='D97706')
     
     border_thin = Border(
         left=Side(style='thin', color='D3D3D3'),
@@ -4003,7 +4054,7 @@ def export_rekap_batch_ba(published_only: int = 1):
             if num_batches == 0:
                 continue
                 
-            stage_width = num_batches * 3
+            stage_width = num_batches * 5
             cell_stage = ws.cell(row=4, column=col_idx, value=stage['stage_name'].upper())
             cell_stage.font = font_header_l1
             cell_stage.fill = fill_l1
@@ -4017,22 +4068,22 @@ def export_rekap_batch_ba(published_only: int = 1):
                 cell_batch.font = font_header_l2
                 cell_batch.fill = fill_l2
                 cell_batch.alignment = align_center
-                ws.merge_cells(start_row=5, start_column=b_col_idx, end_row=5, end_column=b_col_idx + 2)
+                ws.merge_cells(start_row=5, start_column=b_col_idx, end_row=5, end_column=b_col_idx + 4)
                 ws.row_dimensions[5].height = 42
                 
-                metrics = ["VERIFIKASI", "LOLOS", "TIDAK LOLOS"]
+                metrics = ["VERIFIKASI", "LOLOS", "TIDAK LOLOS", "SUDAH SK", "BELUM SK"]
                 for i, m in enumerate(metrics):
                     cell_m = ws.cell(row=6, column=b_col_idx + i, value=m)
                     cell_m.font = font_header_l3
                     cell_m.fill = fill_l3
                     cell_m.alignment = align_center
                     
-                b_col_idx += 3
+                b_col_idx += 5
             col_idx += stage_width
             
         max_col = 2
         for stage in group_stages:
-            max_col += len(stage['batches']) * 3
+            max_col += len(stage['batches']) * 5
             
         for r in range(4, 7):
             for c in range(1, max_col + 1):
@@ -4051,32 +4102,46 @@ def export_rekap_batch_ba(published_only: int = 1):
             c_idx = 3
             for stage in group_stages:
                 for batch in stage['batches']:
-                    kd = batch['data'].get(kab, {"verifikasi": 0, "lolos": 0, "tidak_lolos": 0})
+                    kd = batch['data'].get(kab, {"verifikasi": 0, "lolos": 0, "tidak_lolos": 0, "sk_sudah": 0, "sk_belum": 0})
                     val_v = kd['verifikasi']
                     val_l = kd['lolos']
                     val_tl = kd['tidak_lolos']
+                    val_sks = kd['sk_sudah']
+                    val_skb = kd['sk_belum']
                     
                     cell_v = ws.cell(row=row_idx, column=c_idx, value=val_v or "-")
                     cell_l = ws.cell(row=row_idx, column=c_idx + 1, value=val_l or "-")
                     cell_tl = ws.cell(row=row_idx, column=c_idx + 2, value=val_tl or "-")
+                    cell_sks = ws.cell(row=row_idx, column=c_idx + 3, value=val_sks or "-")
+                    cell_skb = ws.cell(row=row_idx, column=c_idx + 4, value=val_skb or "-")
                     
                     cell_v.alignment = align_center
                     cell_l.alignment = align_center
                     cell_tl.alignment = align_center
+                    cell_sks.alignment = align_center
+                    cell_skb.alignment = align_center
                     
                     cell_v.font = font_data
                     cell_l.font = font_lolos_cell if val_l > 0 else font_data
                     cell_tl.font = font_tidak_lolos_cell if val_tl > 0 else font_data
+                    cell_sks.font = font_sk_sudah_cell if val_sks > 0 else font_data
+                    cell_skb.font = font_sk_belum_cell if val_skb > 0 else font_data
                     
                     if val_l > 0:
                         cell_l.fill = fill_lolos_cell
                     if val_tl > 0:
                         cell_tl.fill = fill_tidak_lolos_cell
+                    if val_sks > 0:
+                        cell_sks.fill = fill_sk_sudah_cell
+                    if val_skb > 0:
+                        cell_skb.fill = fill_sk_belum_cell
                         
                     cell_v.border = border_thin
                     cell_l.border = border_thin
                     cell_tl.border = border_thin
-                    c_idx += 3
+                    cell_sks.border = border_thin
+                    cell_skb.border = border_thin
+                    c_idx += 5
             row_idx += 1
             
         cell_tot_label = ws.cell(row=row_idx, column=2, value="TOTAL")
@@ -4096,23 +4161,33 @@ def export_rekap_batch_ba(published_only: int = 1):
                 cell_tot_v = ws.cell(row=row_idx, column=c_idx, value=t['verifikasi'])
                 cell_tot_l = ws.cell(row=row_idx, column=c_idx + 1, value=t['lolos'])
                 cell_tot_tl = ws.cell(row=row_idx, column=c_idx + 2, value=t['tidak_lolos'])
+                cell_tot_sks = ws.cell(row=row_idx, column=c_idx + 3, value=t['sk_sudah'])
+                cell_tot_skb = ws.cell(row=row_idx, column=c_idx + 4, value=t['sk_belum'])
                 
                 cell_tot_v.font = font_total
                 cell_tot_l.font = font_total
                 cell_tot_tl.font = font_total
+                cell_tot_sks.font = font_total
+                cell_tot_skb.font = font_total
                 
                 cell_tot_v.alignment = align_center
                 cell_tot_l.alignment = align_center
                 cell_tot_tl.alignment = align_center
+                cell_tot_sks.alignment = align_center
+                cell_tot_skb.alignment = align_center
                 
                 cell_tot_v.fill = fill_total_row
                 cell_tot_l.fill = fill_total_row
                 cell_tot_tl.fill = fill_total_row
+                cell_tot_sks.fill = fill_total_row
+                cell_tot_skb.fill = fill_total_row
                 
                 cell_tot_v.border = border_double_top
                 cell_tot_l.border = border_double_top
                 cell_tot_tl.border = border_double_top
-                c_idx += 3
+                cell_tot_sks.border = border_double_top
+                cell_tot_skb.border = border_double_top
+                c_idx += 5
                 
         for col in ws.columns:
             col_idx = col[0].column

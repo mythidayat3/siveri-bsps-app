@@ -3289,6 +3289,24 @@ body {
   color: #fda4af !important;
 }
 
+.rekap-batch-sub-sk-sudah {
+  background: #e0f2fe !important;
+  color: #0369a1 !important;
+}
+.dark .rekap-batch-sub-sk-sudah {
+  background: #075985 !important;
+  color: #7dd3fc !important;
+}
+
+.rekap-batch-sub-sk-belum {
+  background: #fef3c7 !important;
+  color: #b45309 !important;
+}
+.dark .rekap-batch-sub-sk-belum {
+  background: #78350f !important;
+  color: #fde047 !important;
+}
+
 .rekap-batch-sub-verif {
   background: #e2e8f0 !important;
   color: #1e293b !important;
@@ -3328,6 +3346,26 @@ body {
   color: #fca5a5;
 }
 
+.rekap-batch-cell-sk-sudah {
+  background: #f0f9ff;
+  color: #0284c7;
+  font-weight: 600;
+}
+.dark .rekap-batch-cell-sk-sudah {
+  background: #0c4a6e;
+  color: #38bdf8;
+}
+
+.rekap-batch-cell-sk-belum {
+  background: #fffbeb;
+  color: #d97706;
+  font-weight: 500;
+}
+.dark .rekap-batch-cell-sk-belum {
+  background: #451a03;
+  color: #fcd34d;
+}
+
 .rekap-table-unified tbody tr:hover td.rekap-batch-cell-lolos {
   background-color: #dcfce7 !important;
 }
@@ -3339,6 +3377,18 @@ body {
 }
 .dark .rekap-table-unified tbody tr:hover td.rekap-batch-cell-tidak {
   background-color: #7f1d1d !important;
+}
+.rekap-table-unified tbody tr:hover td.rekap-batch-cell-sk-sudah {
+  background-color: #e0f2fe !important;
+}
+.dark .rekap-table-unified tbody tr:hover td.rekap-batch-cell-sk-sudah {
+  background-color: #075985 !important;
+}
+.rekap-table-unified tbody tr:hover td.rekap-batch-cell-sk-belum {
+  background-color: #fef3c7 !important;
+}
+.dark .rekap-table-unified tbody tr:hover td.rekap-batch-cell-sk-belum {
+  background-color: #78350f !important;
 }
 
 /* Rekap Batch BA Vertical Borders */
