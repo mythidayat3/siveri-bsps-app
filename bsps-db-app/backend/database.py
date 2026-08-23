@@ -312,7 +312,8 @@ def init_db():
         ('imamakbar', 'Pkp2025!', 'Imam', 'admin'),
         ('agussalim', 'Pkp2025!', 'Agus', 'admin'),
         ('ilham', 'Pkp2025!', 'Ilham', 'admin'),
-        ('anugrah', 'Pkp2025!', 'Anugrah', 'admin')
+        ('anugrah', 'Pkp2025!', 'Anugrah', 'admin'),
+        ('dwiayu', 'Pkp2025!', 'A. Dwi Ayu', 'admin')
     ]
 
     for u_name, u_pass, u_full, u_role in default_users:
