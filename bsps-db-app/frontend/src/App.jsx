@@ -301,7 +301,7 @@ function App() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Gagal login");
       
-      const userObj = { username: data.username, role: data.role };
+      const userObj = { username: data.username, full_name: data.full_name || data.username, role: data.role };
       setCurrentUser(userObj);
       localStorage.setItem('bsps_user', JSON.stringify(userObj));
       showToast(data.message || "Berhasil login!");
@@ -317,6 +317,106 @@ function App() {
     setCurrentUser(null);
     localStorage.removeItem('bsps_user');
     showToast("Anda telah keluar dari akun");
+  };
+
+  // Change Password Modal States
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
+  const [changePassOld, setChangePassOld] = useState('');
+  const [changePassNew, setChangePassNew] = useState('');
+  const [changePassConfirm, setChangePassConfirm] = useState('');
+  const [showPassOld, setShowPassOld] = useState(false);
+  const [showPassNew, setShowPassNew] = useState(false);
+  const [showPassConfirm, setShowPassConfirm] = useState(false);
+  const [changePassLoading, setChangePassLoading] = useState(false);
+
+  const handleChangePasswordSubmit = async (e) => {
+    e.preventDefault();
+    if (!changePassNew || !changePassConfirm) {
+      showToast("Password baru dan konfirmasi wajib diisi", "error");
+      return;
+    }
+    if (changePassNew.length < 6) {
+      showToast("Password baru minimal 6 karakter", "error");
+      return;
+    }
+    if (changePassNew !== changePassConfirm) {
+      showToast("Konfirmasi password baru tidak sesuai", "error");
+      return;
+    }
+    setChangePassLoading(true);
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/change-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: currentUser?.username,
+          old_password: changePassOld,
+          new_password: changePassNew
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Gagal mengubah password");
+      showToast(data.message || "Password berhasil diperbarui!");
+      setShowChangePasswordModal(false);
+      setChangePassOld('');
+      setChangePassNew('');
+      setChangePassConfirm('');
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      setChangePassLoading(false);
+    }
+  };
+
+  // Activity Logs States & Handlers
+  const [activityLogs, setActivityLogs] = useState([]);
+  const [activityLogsStats, setActivityLogsStats] = useState(null);
+  const [activityLogsLoading, setActivityLogsLoading] = useState(false);
+  const [activityLogsPage, setActivityLogsPage] = useState(1);
+  const [activityLogsTotalPages, setActivityLogsTotalPages] = useState(1);
+  const [activityLogsTotal, setActivityLogsTotal] = useState(0);
+  const [activityLogsFilterUser, setActivityLogsFilterUser] = useState('');
+  const [activityLogsFilterAction, setActivityLogsFilterAction] = useState('');
+  const [activityLogsFilterSearch, setActivityLogsFilterSearch] = useState('');
+  const [activityLogsUserOptions, setActivityLogsUserOptions] = useState([]);
+
+  const fetchActivityLogs = async (page = 1, user = activityLogsFilterUser, action = activityLogsFilterAction, search = activityLogsFilterSearch) => {
+    setActivityLogsLoading(true);
+    try {
+      const params = new URLSearchParams({
+        page: page.toString(),
+        page_size: '50'
+      });
+      if (user) params.append('username', user);
+      if (action) params.append('action_type', action);
+      if (search) params.append('search', search);
+
+      const res = await fetch(`${BACKEND_URL}/api/activity-logs?${params.toString()}`);
+      if (!res.ok) throw new Error("Gagal memuat log aktifitas");
+      const data = await res.json();
+      setActivityLogs(data.logs || []);
+      setActivityLogsStats(data.stats || null);
+      setActivityLogsPage(data.page || 1);
+      setActivityLogsTotalPages(data.total_pages || 1);
+      setActivityLogsTotal(data.total || 0);
+      setActivityLogsUserOptions(data.user_options || []);
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      setActivityLogsLoading(false);
+    }
+  };
+
+  const clearAllActivityLogs = async () => {
+    if (!window.confirm("Apakah Anda yakin ingin membersihkan seluruh log aktifitas? Tindakan ini tidak dapat dibatalkan.")) return;
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/activity-logs/clear`, { method: 'DELETE' });
+      if (!res.ok) throw new Error("Gagal membersihkan log");
+      showToast("Seluruh log aktifitas berhasil dibersihkan");
+      fetchActivityLogs(1);
+    } catch (err) {
+      showToast(err.message, "error");
+    }
   };
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -3368,6 +3468,15 @@ function App() {
                 Unggah Data
               </li>
             )}
+            {isAdmin && (
+              <li 
+                className={`menu-item ${activeTab === 'activity-logs' ? 'active' : ''}`}
+                onClick={() => { setActiveTab('activity-logs'); fetchActivityLogs(); setMobileMenuOpen(false); }}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "8px", verticalAlign: "middle" }}><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                Log Aktifitas
+              </li>
+            )}
             <li 
               className={`menu-item ${activeTab === 'settings' ? 'active' : ''}`}
               onClick={() => { setActiveTab('settings'); setMobileMenuOpen(false); }}
@@ -3384,22 +3493,36 @@ function App() {
         </nav>
 
         <div style={{ marginTop: 'auto', padding: '12px 0 8px 0', borderTop: '1px solid rgba(255, 255, 255, 0.15)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 10px', background: 'rgba(255, 255, 255, 0.1)', borderRadius: '8px', marginBottom: '10px' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-              <span style={{ color: '#ffffff', fontSize: '0.75rem', fontWeight: '700', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
-                👤 {currentUser?.username}
-              </span>
-              <span style={{ color: isAdmin ? '#a7f3d0' : '#fef08a', fontSize: '0.65rem', fontWeight: '700', textTransform: 'uppercase' }}>
-                {isAdmin ? 'ADMIN (Full Access)' : 'VIEWER (Read Only)'}
+          <div style={{ padding: '8px 10px', background: 'rgba(255, 255, 255, 0.1)', borderRadius: '8px', marginBottom: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', maxWidth: '140px' }}>
+                <span style={{ color: '#ffffff', fontSize: '0.8rem', fontWeight: '700', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
+                  👤 {currentUser?.full_name || currentUser?.username}
+                </span>
+                <span style={{ color: 'rgba(255,255,255,0.7)', fontSize: '0.65rem' }}>
+                  @{currentUser?.username}
+                </span>
+              </div>
+              <span style={{ color: isAdmin ? '#a7f3d0' : '#fef08a', fontSize: '0.65rem', fontWeight: '700', textTransform: 'uppercase', background: isAdmin ? 'rgba(16, 185, 129, 0.2)' : 'rgba(234, 179, 8, 0.2)', padding: '2px 6px', borderRadius: '4px' }}>
+                {isAdmin ? 'ADMIN' : 'VIEWER'}
               </span>
             </div>
-            <button
-              onClick={handleLogout}
-              style={{ background: 'rgba(239, 68, 68, 0.25)', border: '1px solid rgba(239, 68, 68, 0.4)', color: '#fca5a5', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.7rem', fontWeight: '700' }}
-              title="Keluar dari akun"
-            >
-              Keluar
-            </button>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <button
+                onClick={() => setShowChangePasswordModal(true)}
+                style={{ flex: 1, background: 'rgba(255, 255, 255, 0.15)', border: '1px solid rgba(255, 255, 255, 0.25)', color: '#ffffff', padding: '4px 6px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.68rem', fontWeight: '600', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
+                title="Ubah Password Akun"
+              >
+                🔑 Ubah Password
+              </button>
+              <button
+                onClick={handleLogout}
+                style={{ background: 'rgba(239, 68, 68, 0.25)', border: '1px solid rgba(239, 68, 68, 0.4)', color: '#fca5a5', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.68rem', fontWeight: '700' }}
+                title="Keluar dari akun"
+              >
+                Keluar
+              </button>
+            </div>
           </div>
           <button
             onClick={() => setDarkMode(!darkMode)}
@@ -5490,6 +5613,296 @@ function App() {
                   <small style={{ color: 'var(--text-muted)' }}>
                     {skDirjenUploading ? "Sedang mengupload dan mencocokkan data..." : "File akan langsung diupload dan dicocokkan saat dipilih."}
                   </small>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Activity Logs View */}
+        {activeTab === 'activity-logs' && (
+          <div className="card-section">
+            <div className="card-header-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+              <div>
+                <span style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '1.1rem', fontWeight: '700' }}>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--primary)' }}><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                  Log Aktifitas Pengguna (Audit Trail)
+                </span>
+                <p style={{ margin: '4px 0 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                  Riwayat aktivitas otentikasi, unggah data, ekspor berkas, dan perubahan sistem SiVeri BSPS
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => fetchActivityLogs(activityLogsPage)}
+                  disabled={activityLogsLoading}
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem' }}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                  {activityLogsLoading ? "Memuat..." : "Segarkan"}
+                </button>
+                {isAdmin && (
+                  <button
+                    className="btn btn-danger"
+                    onClick={clearAllActivityLogs}
+                    style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', background: '#ef4444', borderColor: '#ef4444', color: '#fff' }}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                    Bersihkan Log
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Metrics Cards */}
+            <div className="summary-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', marginTop: '16px', marginBottom: '20px' }}>
+              <div className="summary-card" style={{ borderLeft: '4px solid #3b82f6', padding: '16px' }}>
+                <span className="summary-label" style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>TOTAL LOG AKTIFITAS</span>
+                <span className="summary-value" style={{ fontSize: '1.6rem', fontWeight: '800', color: '#3b82f6' }}>
+                  {activityLogsStats?.total_logs?.toLocaleString('id-ID') || 0}
+                </span>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>Tercatat di sistem</span>
+              </div>
+              <div className="summary-card" style={{ borderLeft: '4px solid #10b981', padding: '16px' }}>
+                <span className="summary-label" style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>AKTIFITAS HARI INI</span>
+                <span className="summary-value" style={{ fontSize: '1.6rem', fontWeight: '800', color: '#10b981' }}>
+                  {activityLogsStats?.today_logs?.toLocaleString('id-ID') || 0}
+                </span>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>Hari ini (WITA)</span>
+              </div>
+              <div className="summary-card" style={{ borderLeft: '4px solid #f59e0b', padding: '16px' }}>
+                <span className="summary-label" style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>USER PALING AKTIF</span>
+                <span className="summary-value" style={{ fontSize: '1.25rem', fontWeight: '800', color: '#f59e0b', wordBreak: 'break-all' }}>
+                  {activityLogsStats?.top_user || '-'}
+                </span>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>Kontributor terbanyak</span>
+              </div>
+              <div className="summary-card" style={{ borderLeft: '4px solid #8b5cf6', padding: '16px' }}>
+                <span className="summary-label" style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>AKSI DOMINAN</span>
+                <span className="summary-value" style={{ fontSize: '1.1rem', fontWeight: '800', color: '#8b5cf6', wordBreak: 'break-all' }}>
+                  {activityLogsStats?.top_action || '-'}
+                </span>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>Aktivitas sistem</span>
+              </div>
+            </div>
+
+            {/* Filter Bar */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center', background: 'var(--bg-secondary)', padding: '14px 16px', borderRadius: '10px', marginBottom: '16px', border: '1px solid var(--border)' }}>
+              <div style={{ flex: '1 1 240px', position: 'relative' }}>
+                <input
+                  type="text"
+                  placeholder="Cari username, nama, atau deskripsi..."
+                  value={activityLogsFilterSearch}
+                  onChange={(e) => {
+                    setActivityLogsFilterSearch(e.target.value);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      fetchActivityLogs(1, activityLogsFilterUser, activityLogsFilterAction, e.target.value);
+                    }
+                  }}
+                  className="form-input"
+                  style={{ width: '100%', paddingLeft: '32px' }}
+                />
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+              </div>
+
+              <div style={{ flex: '0 1 200px' }}>
+                <select
+                  value={activityLogsFilterUser}
+                  onChange={(e) => {
+                    setActivityLogsFilterUser(e.target.value);
+                    fetchActivityLogs(1, e.target.value, activityLogsFilterAction, activityLogsFilterSearch);
+                  }}
+                  className="form-select"
+                  style={{ width: '100%' }}
+                >
+                  <option value="">Semua Pengguna</option>
+                  {activityLogsUserOptions.map(u => (
+                    <option key={u.username} value={u.username}>
+                      {u.full_name ? `${u.full_name} (@${u.username})` : u.username}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ flex: '0 1 200px' }}>
+                <select
+                  value={activityLogsFilterAction}
+                  onChange={(e) => {
+                    setActivityLogsFilterAction(e.target.value);
+                    fetchActivityLogs(1, activityLogsFilterUser, e.target.value, activityLogsFilterSearch);
+                  }}
+                  className="form-select"
+                  style={{ width: '100%' }}
+                >
+                  <option value="">Semua Jenis Aksi</option>
+                  <option value="LOGIN">Login & Autentikasi</option>
+                  <option value="UPLOAD">Unggah Data (INVERS/Verfal/SK)</option>
+                  <option value="DELETE">Hapus Data</option>
+                  <option value="CHANGE_PASSWORD">Ubah Password</option>
+                  <option value="EXPORT">Ekspor Berkas</option>
+                </select>
+              </div>
+
+              <button
+                className="btn btn-primary"
+                onClick={() => fetchActivityLogs(1, activityLogsFilterUser, activityLogsFilterAction, activityLogsFilterSearch)}
+                style={{ padding: '8px 16px', fontSize: '0.85rem' }}
+              >
+                Terapkan
+              </button>
+
+              {(activityLogsFilterSearch || activityLogsFilterUser || activityLogsFilterAction) && (
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setActivityLogsFilterSearch('');
+                    setActivityLogsFilterUser('');
+                    setActivityLogsFilterAction('');
+                    fetchActivityLogs(1, '', '', '');
+                  }}
+                  style={{ padding: '8px 14px', fontSize: '0.85rem' }}
+                >
+                  Reset Filter
+                </button>
+              )}
+            </div>
+
+            {/* Logs Table */}
+            <div className="table-responsive" style={{ border: '1px solid var(--border)', borderRadius: '10px', overflow: 'hidden' }}>
+              <table className="custom-table" style={{ width: '100%', fontSize: '0.85rem' }}>
+                <thead style={{ background: 'var(--table-header-bg, #f1f5f9)' }}>
+                  <tr>
+                    <th style={{ width: '50px', textAlign: 'center' }}>NO</th>
+                    <th style={{ width: '160px' }}>WAKTU (WITA)</th>
+                    <th style={{ width: '190px' }}>PENGGUNA</th>
+                    <th style={{ width: '140px' }}>KATEGORI / AKSI</th>
+                    <th>DETAIL AKTIVITAS</th>
+                    <th style={{ width: '120px', textAlign: 'center' }}>IP / CLIENT</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {activityLogsLoading ? (
+                    <tr>
+                      <td colSpan="6" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                          <span className="spinner" style={{ width: '24px', height: '24px', borderWidth: '3px' }}></span>
+                          <span>Memuat log aktifitas...</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : activityLogs.length === 0 ? (
+                    <tr>
+                      <td colSpan="6" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ fontSize: '2rem' }}>📋</span>
+                          <span style={{ fontWeight: '600' }}>Tidak ada riwayat log aktifitas ditemukan</span>
+                          <span style={{ fontSize: '0.8rem' }}>Aktivitas baru akan otomatis dicatat di tabel ini.</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    activityLogs.map((log, index) => {
+                      const rowNum = (activityLogsPage - 1) * 50 + index + 1;
+                      const act = log.action || '';
+                      
+                      let badgeBg = '#e0f2fe';
+                      let badgeColor = '#0369a1';
+                      let badgeBorder = '#bae6fd';
+
+                      if (act.includes('LOGIN_FAILED') || act.includes('DELETE') || act.includes('FAILED')) {
+                        badgeBg = '#fee2e2';
+                        badgeColor = '#b91c1c';
+                        badgeBorder = '#fecaca';
+                      } else if (act.includes('UPLOAD') || act.includes('SUCCESS')) {
+                        badgeBg = '#dcfce7';
+                        badgeColor = '#15803d';
+                        badgeBorder = '#bbf7d0';
+                      } else if (act.includes('CHANGE_PASSWORD') || act.includes('PASSWORD')) {
+                        badgeBg = '#fef3c7';
+                        badgeColor = '#b45309';
+                        badgeBorder = '#fde68a';
+                      } else if (act.includes('EXPORT')) {
+                        badgeBg = '#f3e8ff';
+                        badgeColor = '#7e22ce';
+                        badgeBorder = '#e9d5ff';
+                      }
+
+                      return (
+                        <tr key={log.id || index} style={{ borderBottom: '1px solid var(--border)' }}>
+                          <td style={{ textAlign: 'center', fontWeight: '600', color: 'var(--text-muted)' }}>{rowNum}</td>
+                          <td style={{ whiteSpace: 'nowrap', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                            {log.created_at ? log.created_at.replace('T', ' ').substring(0, 19) : '-'}
+                          </td>
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'linear-gradient(135deg, var(--primary), #6366f1)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700', fontSize: '0.75rem', flexShrink: 0 }}>
+                                {(log.full_name || log.username || 'U').charAt(0).toUpperCase()}
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column', lineHeight: '1.2' }}>
+                                <span style={{ fontWeight: '700', color: 'var(--text-main)' }}>{log.full_name || log.username}</span>
+                                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>@{log.username}</span>
+                              </div>
+                            </div>
+                          </td>
+                          <td>
+                            <span style={{
+                              display: 'inline-block',
+                              padding: '3px 8px',
+                              borderRadius: '6px',
+                              fontSize: '0.72rem',
+                              fontWeight: '700',
+                              background: badgeBg,
+                              color: badgeColor,
+                              border: `1px solid ${badgeBorder}`
+                            }}>
+                              {log.action}
+                            </span>
+                          </td>
+                          <td style={{ wordBreak: 'break-word', lineHeight: '1.4' }}>
+                            {log.details || '-'}
+                            {log.entity_name && (
+                              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                                Target: <code style={{ padding: '1px 4px', background: 'var(--bg-secondary)', borderRadius: '3px' }}>{log.entity_name}</code>
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+                            {log.ip_address || '-'}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination Controls */}
+            {activityLogsTotalPages > 1 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px', padding: '8px 4px', flexWrap: 'wrap', gap: '8px' }}>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                  Menampilkan {activityLogs.length} dari {activityLogsTotal} total log (Halaman {activityLogsPage} dari {activityLogsTotalPages})
+                </span>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() => fetchActivityLogs(activityLogsPage - 1)}
+                    disabled={activityLogsPage <= 1 || activityLogsLoading}
+                    style={{ padding: '6px 12px', fontSize: '0.8rem' }}
+                  >
+                    &larr; Sebelumnya
+                  </button>
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() => fetchActivityLogs(activityLogsPage + 1)}
+                    disabled={activityLogsPage >= activityLogsTotalPages || activityLogsLoading}
+                    style={{ padding: '6px 12px', fontSize: '0.8rem' }}
+                  >
+                    Selanjutnya &rarr;
+                  </button>
                 </div>
               </div>
             )}
@@ -7945,6 +8358,122 @@ function App() {
               <button className="btn btn-secondary" onClick={() => setSkDirjenPairingRecord(null)}>Batal</button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Modal Ubah Password */}
+      {showChangePasswordModal && (
+        <div className="modal-overlay" onClick={() => setShowChangePasswordModal(false)}>
+          <form 
+            className="modal-content" 
+            style={{ maxWidth: '440px' }} 
+            onClick={(e) => e.stopPropagation()} 
+            onSubmit={handleChangePasswordSubmit}
+          >
+            <div className="modal-header">
+              <span style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '1rem', fontWeight: '700' }}>
+                🔑 Ubah Password Akun
+              </span>
+              <button 
+                type="button" 
+                className="modal-close" 
+                onClick={() => setShowChangePasswordModal(false)}
+              >
+                &times;
+              </button>
+            </div>
+            <div className="modal-body" style={{ padding: '20px' }}>
+              <div style={{ background: 'var(--bg-secondary)', padding: '10px 14px', borderRadius: '8px', marginBottom: '16px', border: '1px solid var(--border)' }}>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Pengguna Saat Ini:</div>
+                <div style={{ fontWeight: '700', fontSize: '0.9rem', color: 'var(--text-main)' }}>
+                  {currentUser?.full_name || currentUser?.username} (@{currentUser?.username})
+                </div>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '14px' }}>
+                <label className="form-label">Password Lama (Opsional / Jika Ada)</label>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type={showPassOld ? "text" : "password"}
+                    className="form-input"
+                    value={changePassOld}
+                    onChange={(e) => setChangePassOld(e.target.value)}
+                    placeholder="Masukkan password saat ini"
+                    style={{ paddingRight: '40px', width: '100%' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassOld(!showPassOld)}
+                    style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '0.85rem' }}
+                  >
+                    {showPassOld ? "🙈" : "👁️"}
+                  </button>
+                </div>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '14px' }}>
+                <label className="form-label">Password Baru <span style={{ color: 'red' }}>*</span></label>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type={showPassNew ? "text" : "password"}
+                    className="form-input"
+                    value={changePassNew}
+                    onChange={(e) => setChangePassNew(e.target.value)}
+                    placeholder="Minimal 6 karakter"
+                    required
+                    style={{ paddingRight: '40px', width: '100%' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassNew(!showPassNew)}
+                    style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '0.85rem' }}
+                  >
+                    {showPassNew ? "🙈" : "👁️"}
+                  </button>
+                </div>
+                <small style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}>Gunakan kombinasi huruf, angka, dan simbol untuk keamanan.</small>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '8px' }}>
+                <label className="form-label">Konfirmasi Password Baru <span style={{ color: 'red' }}>*</span></label>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type={showPassConfirm ? "text" : "password"}
+                    className="form-input"
+                    value={changePassConfirm}
+                    onChange={(e) => setChangePassConfirm(e.target.value)}
+                    placeholder="Ketik ulang password baru"
+                    required
+                    style={{ paddingRight: '40px', width: '100%' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassConfirm(!showPassConfirm)}
+                    style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '0.85rem' }}
+                  >
+                    {showPassConfirm ? "🙈" : "👁️"}
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer" style={{ padding: '12px 20px', display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button 
+                type="button" 
+                className="btn btn-secondary" 
+                onClick={() => setShowChangePasswordModal(false)}
+                disabled={changePassLoading}
+              >
+                Batal
+              </button>
+              <button 
+                type="submit" 
+                className="btn btn-primary"
+                disabled={changePassLoading}
+              >
+                {changePassLoading ? "Menyimpan..." : "Simpan Password"}
+              </button>
+            </div>
+          </form>
         </div>
       )}
 

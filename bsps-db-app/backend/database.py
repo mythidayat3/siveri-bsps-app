@@ -280,15 +280,68 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT UNIQUE NOT NULL,
         password TEXT NOT NULL,
+        full_name TEXT,
         role TEXT NOT NULL DEFAULT 'viewer',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """)
 
-    # Seed default accounts if missing
-    cursor.execute("INSERT OR IGNORE INTO users (id, username, password, role) VALUES (1, 'yayatbalai', 'semangat45', 'admin')")
-    cursor.execute("INSERT OR IGNORE INTO users (id, username, password, role) VALUES (2, 'balai_sul_3', 'balaimk5', 'viewer')")
-    cursor.execute("INSERT OR IGNORE INTO users (id, username, password, role) VALUES (3, 'balaip3kp', 'semangat45', 'admin')")
+    # Ensure full_name column exists for existing table
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN full_name TEXT")
+    except Exception:
+        pass
+
+    # Seed admin and viewer accounts
+    default_users = [
+        ('yayatbalai', 'semangat45', 'Yayat Balai', 'admin'),
+        ('balai_sul_3', 'balaimk5', 'Balai Sul 3', 'viewer'),
+        ('balaip3kp', 'semangat45', 'Balai P3KP', 'admin'),
+        ('sittihusniah', 'Pkp2025!', 'Husniah', 'admin'),
+        ('nurulaulia', 'Pkp2025!', 'Nurul', 'admin'),
+        ('mhidayat', 'Pkp2025!', 'Hidayat', 'admin'),
+        ('irmawan', 'Pkp2025!', 'Irmawan', 'admin'),
+        ('um', 'Pkp2025!', 'Khumairah', 'admin'),
+        ('alfianasn', 'Pkp2025!', 'Alfian', 'admin'),
+        ('novia', 'Pkp2025!', 'Novia', 'admin'),
+        ('aliyah', 'Pkp2025!', 'Aliyah', 'admin'),
+        ('inggrid', 'Pkp2025!', 'Inggrid', 'admin'),
+        ('alfiansyah', 'Pkp2025!', 'Alfiansyah', 'admin'),
+        ('alfianw', 'Pkp2025!', 'Alfian Wiratama', 'admin'),
+        ('wahyuni', 'Pkp2025!', 'Yuni', 'admin'),
+        ('imamakbar', 'Pkp2025!', 'Imam', 'admin'),
+        ('agussalim', 'Pkp2025!', 'Agus', 'admin'),
+        ('ilham', 'Pkp2025!', 'Ilham', 'admin'),
+        ('anugrah', 'Pkp2025!', 'Anugrah', 'admin')
+    ]
+
+    for u_name, u_pass, u_full, u_role in default_users:
+        cursor.execute("""
+            INSERT INTO users (username, password, full_name, role)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(username) DO UPDATE SET
+                full_name = excluded.full_name,
+                role = excluded.role
+        """, (u_name, u_pass, u_full, u_role))
+
+    # 13. Activity Logs Table (Audit Trail)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS activity_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        username TEXT NOT NULL,
+        full_name TEXT,
+        action TEXT NOT NULL,
+        entity_type TEXT,
+        entity_name TEXT,
+        details TEXT,
+        ip_address TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_activity_logs_user ON activity_logs(username);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_activity_logs_action ON activity_logs(action);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_activity_logs_created ON activity_logs(created_at DESC);")
 
     # 13. Village Codes Table (Master Kode Desa / Kelurahan)
     cursor.execute("""

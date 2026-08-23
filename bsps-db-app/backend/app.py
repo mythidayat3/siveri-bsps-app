@@ -13,7 +13,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib import colors
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Body, Query
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Body, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
 from database import get_db_connection, DB_PATH, init_db, lookup_village_code, normalize_geo_name
@@ -63,60 +63,198 @@ def clean_nik(val):
 def root_health_check():
     return {"status": "ok", "message": "SiVeri BSPS Backend API Online"}
 
+def log_activity(username: str, action: str, entity_type: str = None, entity_name: str = None, details: str = None, ip_address: str = None, user_id: int = None, full_name: str = None):
+    """Log an activity to activity_logs table safely."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        if not full_name or not user_id:
+            cursor.execute("SELECT id, full_name FROM users WHERE LOWER(username) = LOWER(?)", (username,))
+            u = cursor.fetchone()
+            if u:
+                if not user_id: user_id = u['id']
+                if not full_name: full_name = u['full_name']
+                
+        cursor.execute("""
+            INSERT INTO activity_logs (user_id, username, full_name, action, entity_type, entity_name, details, ip_address)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (user_id, username, full_name or username, action, entity_type, entity_name, details, ip_address))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Error logging activity: {e}")
+
 @app.post("/api/login")
-def login(body: dict = Body(...)):
+def login(request: Request, body: dict = Body(...)):
     username = body.get("username", "").strip()
     password = body.get("password", "").strip()
 
     if not username or not password:
         raise HTTPException(status_code=400, detail="Username dan password wajib diisi")
 
+    client_ip = request.client.host if request.client else None
+
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, username, password, role FROM users WHERE LOWER(username) = LOWER(?)", (username,))
+    cursor.execute("SELECT id, username, password, full_name, role FROM users WHERE LOWER(username) = LOWER(?)", (username,))
     user = cursor.fetchone()
     conn.close()
 
     if not user or user['password'] != password:
+        log_activity(username=username, action="LOGIN_FAILED", entity_type="AUTH", entity_name="Login Gagal", details=f"Percobaan login gagal untuk username '{username}'", ip_address=client_ip)
         raise HTTPException(status_code=401, detail="Username atau password tidak valid")
+
+    log_activity(username=user['username'], action="LOGIN", entity_type="AUTH", entity_name="Login Sukses", details=f"User '{user['username']}' ({user['full_name'] or user['username']}) berhasil masuk sebagai {user['role'].upper()}", ip_address=client_ip, user_id=user['id'], full_name=user['full_name'])
 
     return {
         "id": user['id'],
         "username": user['username'],
+        "full_name": user['full_name'] or user['username'],
         "role": user['role'],
-        "message": f"Selamat datang, {user['username']}!"
+        "message": f"Selamat datang, {user['full_name'] or user['username']}!"
     }
 
 @app.post("/api/change-password")
-def change_password(body: dict = Body(...)):
+def change_password(request: Request, body: dict = Body(...)):
     target_username = body.get("username", "").strip()
+    old_password = body.get("old_password", "").strip()
     new_password = body.get("new_password", "").strip()
 
     if not target_username or not new_password:
         raise HTTPException(status_code=400, detail="Username dan password baru wajib diisi")
 
-    if len(new_password) < 4:
-        raise HTTPException(status_code=400, detail="Password minimal 4 karakter")
+    if len(new_password) < 6:
+        raise HTTPException(status_code=400, detail="Password baru minimal 6 karakter")
+
+    client_ip = request.client.host if request.client else None
 
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("UPDATE users SET password = ? WHERE LOWER(username) = LOWER(?)", (new_password, target_username))
-    if cursor.rowcount == 0:
+    cursor.execute("SELECT id, username, password, full_name, role FROM users WHERE LOWER(username) = LOWER(?)", (target_username,))
+    user = cursor.fetchone()
+
+    if not user:
         conn.close()
         raise HTTPException(status_code=404, detail="Pengguna tidak ditemukan")
 
+    if old_password and user['password'] != old_password:
+        conn.close()
+        log_activity(username=target_username, action="CHANGE_PASSWORD_FAILED", entity_type="USER", entity_name=target_username, details="Password lama salah", ip_address=client_ip, user_id=user['id'], full_name=user['full_name'])
+        raise HTTPException(status_code=400, detail="Password lama tidak sesuai")
+
+    cursor.execute("UPDATE users SET password = ? WHERE id = ?", (new_password, user['id']))
     conn.commit()
     conn.close()
-    return {"message": f"Password untuk '{target_username}' berhasil diperbarui"}
+
+    log_activity(username=user['username'], action="CHANGE_PASSWORD", entity_type="USER", entity_name=user['username'], details=f"Password berhasil diperbarui oleh '{user['username']}'", ip_address=client_ip, user_id=user['id'], full_name=user['full_name'])
+
+    return {"message": f"Password untuk '{user['username']}' berhasil diperbarui"}
 
 @app.get("/api/users")
 def get_users():
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, username, role, created_at FROM users ORDER BY id ASC")
+    cursor.execute("SELECT id, username, full_name, role, created_at FROM users ORDER BY id ASC")
     users = [dict(row) for row in cursor.fetchall()]
     conn.close()
     return users
+
+@app.get("/api/activity-logs")
+def get_activity_logs(
+    page: int = 1,
+    page_size: int = 50,
+    search: str = "",
+    username: str = "",
+    action_type: str = "",
+    start_date: str = "",
+    end_date: str = ""
+):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    conditions = []
+    params = []
+
+    if search.strip():
+        s = f"%{search.strip()}%"
+        conditions.append("(username LIKE ? OR full_name LIKE ? OR action LIKE ? OR entity_name LIKE ? OR details LIKE ?)")
+        params.extend([s, s, s, s, s])
+
+    if username.strip():
+        conditions.append("LOWER(username) = LOWER(?)")
+        params.append(username.strip())
+
+    if action_type.strip():
+        conditions.append("action LIKE ?")
+        params.append(f"%{action_type.strip()}%")
+
+    if start_date.strip():
+        conditions.append("date(created_at) >= date(?)")
+        params.append(start_date.strip())
+
+    if end_date.strip():
+        conditions.append("date(created_at) <= date(?)")
+        params.append(end_date.strip())
+
+    where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
+
+    # Total count
+    cursor.execute(f"SELECT COUNT(*) FROM activity_logs {where_clause}", params)
+    total_count = cursor.fetchone()[0]
+
+    # Stats
+    cursor.execute("SELECT COUNT(*) FROM activity_logs WHERE date(created_at) = date('now')")
+    today_count = cursor.fetchone()[0]
+
+    cursor.execute("SELECT username, COUNT(*) as cnt FROM activity_logs GROUP BY username ORDER BY cnt DESC LIMIT 1")
+    top_user_row = cursor.fetchone()
+    top_user = top_user_row['username'] if top_user_row else "-"
+
+    cursor.execute("SELECT action, COUNT(*) as cnt FROM activity_logs GROUP BY action ORDER BY cnt DESC LIMIT 1")
+    top_action_row = cursor.fetchone()
+    top_action = top_action_row['action'] if top_action_row else "-"
+
+    # Distinct users for filter dropdown
+    cursor.execute("SELECT DISTINCT username, full_name FROM users ORDER BY full_name ASC, username ASC")
+    user_options = [dict(r) for r in cursor.fetchall()]
+
+    # Fetch records with pagination
+    offset = (max(1, page) - 1) * page_size
+    query = f"""
+        SELECT id, user_id, username, full_name, action, entity_type, entity_name, details, ip_address, created_at
+        FROM activity_logs
+        {where_clause}
+        ORDER BY created_at DESC, id DESC
+        LIMIT ? OFFSET ?
+    """
+    cursor.execute(query, params + [page_size, offset])
+    logs = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+
+    return {
+        "logs": logs,
+        "total": total_count,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": (total_count + page_size - 1) // page_size if total_count > 0 else 1,
+        "stats": {
+            "total_logs": total_count,
+            "today_logs": today_count,
+            "top_user": top_user,
+            "top_action": top_action
+        },
+        "user_options": user_options
+    }
+
+@app.delete("/api/activity-logs/clear")
+def clear_activity_logs():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM activity_logs")
+    conn.commit()
+    conn.close()
+    return {"message": "Seluruh log aktifitas berhasil dibersihkan"}
 
 @app.get("/api/provinces")
 def get_provinces():
@@ -326,6 +464,14 @@ async def upload_invers(stage_name: str = Form(...), province_id: int = Form(1),
               deliniasi, catatan_katalog, pengusul, tahap))
         inserted_count += 1
         
+    log_activity(
+        username="Admin",
+        action="UPLOAD_INVERS",
+        entity_type="INVERS",
+        entity_name=stage_name,
+        details=f"Unggah data INVERS '{stage_name}': {inserted_count} baris data (Revisi #{next_rev_num})"
+    )
+    
     conn.commit()
     conn.close()
     
@@ -588,6 +734,14 @@ async def upload_verified(
                   no_ktp_pengganti, no_kk_pengganti, alamat_pengganti,
                   desa_kelurahan_pengganti, kecamatan_pengganti, kabupaten_pengganti))
             
+    log_activity(
+        username="Admin",
+        action="UPLOAD_VERIFIKASI",
+        entity_type="VERIFIKASI",
+        entity_name=batch_name,
+        details=f"Unggah batch verifikasi '{batch_name}': {stats['lolos_added']} Lolos, {stats['tidak_lolos_added']} Tidak Lolos"
+    )
+    
     conn.commit()
     conn.close()
     REKAP_CACHE.clear()
@@ -837,6 +991,14 @@ async def upload_verfal(
                   no_ktp_pengganti, no_kk_pengganti, alamat_pengganti,
                   desa_kelurahan_pengganti, kecamatan_pengganti, kabupaten_pengganti))
             
+    log_activity(
+        username="Admin",
+        action="UPLOAD_VERFAL",
+        entity_type="VERFAL",
+        entity_name=f"{kab_clean} - {batch_name}",
+        details=f"Unggah Berita Acara Verfal '{batch_name}' ({kab_clean}): {stats['lolos']} Lolos, {stats['tidak_lolos']} Tidak Lolos, {stats['replacements']} Pengganti"
+    )
+    
     conn.commit()
     conn.close()
     REKAP_CACHE.clear()
@@ -3086,11 +3248,11 @@ def export_verfal_excel(batch_id: int):
     tidak_lolos_records = [r for r in records if r['status'] == 'TIDAK LOLOS']
     
     template_candidates = [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates", "EXPORT_VERFAL.xlsx"),
         os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "EXPORT_VERFAL.xlsx"),
         os.path.join(BASE_DIR, "EXPORT_VERFAL.xlsx"),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates", "EXPORT_VERFAL.xlsx"),
-        os.path.join(os.getcwd(), "EXPORT_VERFAL.xlsx"),
-        os.path.join(os.getcwd(), "backend", "templates", "EXPORT_VERFAL.xlsx")
+        os.path.join(os.getcwd(), "backend", "templates", "EXPORT_VERFAL.xlsx"),
+        os.path.join(os.getcwd(), "EXPORT_VERFAL.xlsx")
     ]
     template_path = None
     for candidate in template_candidates:
@@ -3247,6 +3409,7 @@ def export_verfal_excel(batch_id: int):
     ws_iiia['A4'] = f"PROVINSI {prov_name}"
 
     # Determine columns layout from template header row 7
+    has_22_cols = (ws_iiia.cell(row=7, column=5).value and 'KK' in str(ws_iiia.cell(row=7, column=5).value).upper())
     is_21_cols = (ws_iiia.cell(row=7, column=14).value and 'NO.KK' in str(ws_iiia.cell(row=7, column=14).value).upper())
     
     if ws_iiia.max_row >= 8:
@@ -3255,7 +3418,33 @@ def export_verfal_excel(batch_id: int):
     r_idx = 8
     for idx, rec in enumerate(tidak_lolos_records, 1):
         ws_iiia.row_dimensions[r_idx].height = 28.05
-        if is_21_cols:
+        if has_22_cols:
+            vals = [
+                idx,
+                rec['nama'],
+                rec['jenis_kelamin'],
+                rec['no_ktp'],
+                rec['no_kk'] or "",
+                rec['alamat'],
+                rec['desa_kelurahan'],
+                rec['kecamatan'],
+                rec['kabupaten_kota'] or kab_name,
+                rec['alasan_tidak_lolos'],
+                "", # BNBA
+                rec.get('nama_pengganti') or "",
+                rec.get('jenis_kelamin_pengganti') or "",
+                rec.get('no_ktp_pengganti') or "",
+                rec.get('no_kk_pengganti') or "",
+                rec.get('alamat_pengganti') or "",
+                rec.get('desa_kelurahan_pengganti') or "",
+                rec.get('kecamatan_pengganti') or "",
+                rec.get('kabupaten_pengganti') or kab_name,
+                rec['tahap'] or stage_name,
+                rec['tanggal'] or batch.get('tanggal_ba') or "",
+                rec['keterangan'] or ""
+            ]
+            center_cols = {1, 3, 4, 5, 10, 11, 13, 14, 15, 20, 21}
+        elif is_21_cols:
             vals = [
                 idx,
                 rec['nama'],
@@ -3316,7 +3505,7 @@ def export_verfal_excel(batch_id: int):
     # Tanda Tangan & Catatan Lamp.IIIA (Pic 2)
     row_sig_iiia = r_idx + 2
     col_left = 5
-    col_right = 18 if is_21_cols else 15
+    col_right = 18 if (has_22_cols or is_21_cols) else 15
     
     # Left: Mengetahui - Kepala Balai
     ws_iiia.cell(row=row_sig_iiia, column=col_left, value="Mengetahui,").font = font_sig
