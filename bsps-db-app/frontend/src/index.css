@@ -3801,74 +3801,142 @@ body {
   letter-spacing: -0.01em;
 }
 
-.verfal-badges-group {
+.verfal-grid-metrics {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: 10px;
 }
 
-.verfal-pill {
-  display: inline-flex;
+.verfal-metric-col {
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border-radius: 20px;
-  font-size: 0.8rem;
+  justify-content: center;
+  min-width: 66px;
+  padding: 5px 10px;
+  background: var(--bg-card, #ffffff);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+  transition: all 0.15s ease;
+}
+
+.dark .verfal-metric-col {
+  background: rgba(30, 41, 59, 0.7);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.verfal-metric-col.col-verif {
+  min-width: 100px;
+}
+
+.verfal-metric-col .metric-label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted, #64748b);
+  margin-bottom: 2px;
+  white-space: nowrap;
+}
+
+.verfal-metric-col .metric-value {
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: var(--text-main);
+  line-height: 1.1;
+}
+
+.verfal-metric-col .metric-sub {
+  font-size: 0.65rem;
   font-weight: 600;
+  color: var(--text-muted);
+  margin-top: 2px;
+  white-space: nowrap;
 }
 
-.verfal-pill.alokasi {
-  background: #e0e7ff;
-  color: #3730a3;
+.verfal-metric-col.col-alokasi {
+  background: #eef2ff;
+  border-color: #c7d2fe;
 }
-.dark .verfal-pill.alokasi {
-  background: #312e81;
-  color: #c7d2fe;
+.verfal-metric-col.col-alokasi .metric-value {
+  color: #4338ca;
+}
+.verfal-metric-col.col-alokasi .metric-label {
+  color: #4f46e5;
+}
+.dark .verfal-metric-col.col-alokasi {
+  background: rgba(49, 46, 129, 0.35);
+  border-color: rgba(99, 102, 241, 0.3);
+}
+.dark .verfal-metric-col.col-alokasi .metric-value {
+  color: #a5b4fc;
 }
 
-.verfal-pill.verif {
-  background: #e2e8f0;
-  color: #1e293b;
+.verfal-metric-col.col-lolos {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
 }
-.dark .verfal-pill.verif {
-  background: #334155;
-  color: #f8fafc;
+.verfal-metric-col.col-lolos .metric-value {
+  color: #15803d;
 }
-
-.verfal-pill.lolos {
-  background: #dcfce7;
-  color: #166534;
+.verfal-metric-col.col-lolos .metric-label {
+  color: #16a34a;
 }
-.dark .verfal-pill.lolos {
-  background: #14532d;
+.dark .verfal-metric-col.col-lolos {
+  background: rgba(20, 83, 45, 0.35);
+  border-color: rgba(34, 197, 94, 0.3);
+}
+.dark .verfal-metric-col.col-lolos .metric-value {
   color: #86efac;
 }
 
-.verfal-pill.tidak {
-  background: #fee2e2;
-  color: #991b1b;
+.verfal-metric-col.col-tidak {
+  background: #fef2f2;
+  border-color: #fecaca;
 }
-.dark .verfal-pill.tidak {
-  background: #451a1a;
+.verfal-metric-col.col-tidak .metric-value {
+  color: #b91c1c;
+}
+.verfal-metric-col.col-tidak .metric-label {
+  color: #dc2626;
+}
+.dark .verfal-metric-col.col-tidak {
+  background: rgba(69, 26, 26, 0.35);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+.dark .verfal-metric-col.col-tidak .metric-value {
   color: #fca5a5;
 }
 
-.verfal-pill.pengganti {
-  background: #fef3c7;
-  color: #92400e;
+.verfal-metric-col.col-pengganti {
+  background: #fffbeb;
+  border-color: #fde68a;
 }
-.dark .verfal-pill.pengganti {
-  background: #451a03;
+.verfal-metric-col.col-pengganti .metric-value.has-val {
+  color: #b45309;
+}
+.verfal-metric-col.col-pengganti .metric-value.is-zero {
+  color: #9ca3af;
+}
+.verfal-metric-col.col-pengganti .metric-label {
+  color: #d97706;
+}
+.dark .verfal-metric-col.col-pengganti {
+  background: rgba(69, 26, 3, 0.35);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+.dark .verfal-metric-col.col-pengganti .metric-value.has-val {
   color: #fde68a;
 }
-
-.verfal-pill.belum {
-  background: #f1f5f9;
+.dark .verfal-metric-col.col-pengganti .metric-value.is-zero {
   color: #64748b;
 }
-.dark .verfal-pill.belum {
-  background: #1e293b;
+
+.verfal-metric-col.col-sisa .metric-value {
+  color: #64748b;
+}
+.dark .verfal-metric-col.col-sisa .metric-value {
   color: #94a3b8;
 }
 

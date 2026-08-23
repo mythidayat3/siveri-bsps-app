@@ -1020,6 +1020,17 @@ def get_verfal_batches_grouped(stage_id: int):
         """, (b_id,))
         rep_cnt = cursor.fetchone()['cnt']
         
+        cursor.execute("""
+            SELECT alasan_tidak_lolos, COUNT(*) as cnt
+            FROM verified_records
+            WHERE batch_id = ? AND status = 'TIDAK LOLOS' AND alasan_tidak_lolos IS NOT NULL AND TRIM(alasan_tidak_lolos) != ''
+            GROUP BY alasan_tidak_lolos
+            ORDER BY cnt DESC
+            LIMIT 1
+        """, (b_id,))
+        m_row = cursor.fetchone()
+        b['alasan_tidak_lolos_terbanyak'] = m_row['alasan_tidak_lolos'] if m_row else ''
+        
         b['lolos_count'] = l_cnt
         b['tidak_lolos_count'] = tl_cnt
         b['replacement_count'] = rep_cnt
@@ -2724,6 +2735,50 @@ def delete_verified_record(record_id: int):
 
 # --- BULK OPERATIONS ---
 
+def replace_docx_placeholder(paragraph, search_text, replace_text):
+    while search_text in paragraph.text:
+        # 1. Direct replacement if in single run
+        replaced = False
+        for run in paragraph.runs:
+            if search_text in run.text:
+                run.text = run.text.replace(search_text, replace_text)
+                replaced = True
+                break
+        if replaced:
+            continue
+            
+        # 2. Multi-run spanning replacement (preserves shapes, drawings, and other runs)
+        full_text = ''.join(r.text for r in paragraph.runs)
+        start_idx = full_text.find(search_text)
+        if start_idx == -1:
+            break
+        end_idx = start_idx + len(search_text)
+        
+        cur_pos = 0
+        first_match = True
+        for run in paragraph.runs:
+            run_len = len(run.text)
+            run_start = cur_pos
+            run_end = cur_pos + run_len
+            
+            if run_end <= start_idx or run_start >= end_idx:
+                pass
+            elif run_start <= start_idx and run_end >= end_idx:
+                p1 = run.text[:start_idx - run_start]
+                p2 = run.text[end_idx - run_start:]
+                run.text = p1 + replace_text + p2
+            elif run_start <= start_idx and run_end < end_idx:
+                p1 = run.text[:start_idx - run_start]
+                run.text = p1 + (replace_text if first_match else '')
+                first_match = False
+            elif run_start > start_idx and run_end <= end_idx:
+                run.text = ''
+            elif run_start > start_idx and run_end > end_idx:
+                p2 = run.text[end_idx - run_start:]
+                run.text = p2
+
+            cur_pos += run_len
+
 @app.post("/api/export/verfal/docx")
 async def export_verfal_docx(
     batch_id: int = Form(...),
@@ -2738,11 +2793,6 @@ async def export_verfal_docx(
     tanggal_terbit_ba_verfal: str = Form(""),
     alasan_tidak_lolos_terbanyak: str = Form("")
 ):
-    import json
-    import docx
-    from docx.shared import Pt, Inches
-    from collections import Counter
-    
     conn = get_db_connection()
     cursor = conn.cursor()
     
@@ -2764,33 +2814,6 @@ async def export_verfal_docx(
     kab_name = (batch['kabupaten'] or "").upper().strip()
     batch_name = batch['name']
     
-    meta = {
-        "nomor_ba_verfal": nomor_ba_verfal,
-        "tahun_anggaran": tahun_anggaran,
-        "nomor_ba_versul": nomor_ba_versul,
-        "tanggal_ba_verfal": tanggal_ba_verfal,
-        "total_alokasi_versul": total_alokasi_versul,
-        "total_alokasi_invers": total_alokasi_invers,
-        "nama_pejabat_ketua_tim": nama_pejabat_ketua_tim,
-        "nama_pejabat_kepala_balai": nama_pejabat_kepala_balai,
-        "tanggal_terbit_ba_verfal": tanggal_terbit_ba_verfal,
-        "alasan_tidak_lolos_terbanyak": alasan_tidak_lolos_terbanyak
-    }
-    cursor.execute("""
-        UPDATE verified_batches
-        SET nomor_ba = ?, tanggal_ba = ?, metadata_json = ?
-        WHERE id = ?
-    """, (nomor_ba_verfal, tanggal_ba_verfal, json.dumps(meta), batch_id))
-    conn.commit()
-    
-    if not total_alokasi_invers:
-        cursor.execute("""
-            SELECT COUNT(*) as cnt FROM invers_records ir
-            JOIN invers_revisions irv ON ir.revision_id = irv.id
-            WHERE irv.stage_id = ? AND irv.is_active = 1 AND UPPER(TRIM(ir.kabupaten_kota)) = UPPER(?)
-        """, (stage_id, kab_name))
-        total_alokasi_invers = str(cursor.fetchone()['cnt'])
-        
     cursor.execute("""
         SELECT vr.*, re.nama_pengganti, re.jenis_kelamin_pengganti, re.no_ktp_pengganti,
                re.no_kk_pengganti, re.alamat_pengganti, re.desa_kelurahan_pengganti,
@@ -2809,10 +2832,10 @@ async def export_verfal_docx(
     count_lolos = len(lolos_records)
     count_tidak_lolos = len(tidak_lolos_records)
     
-    months_id = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
     tgl_val = ""
     bln_val = ""
-    thn_val = tahun_anggaran
+    thn_val = ""
+    months_id = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
     if "-" in tanggal_ba_verfal:
         parts = tanggal_ba_verfal.split("-")
         if len(parts) == 3:
@@ -2842,13 +2865,13 @@ async def export_verfal_docx(
         alasan_tidak_lolos_terbanyak = "-"
     
     template_candidates = [
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "FORMAT BA VERFAL.docx"),
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "BERITA ACARA.docx"),
         os.path.join(BASE_DIR, "FORMAT BERITA ACARA VERFAL.docx"),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates", "FORMAT BERITA ACARA VERFAL.docx"),
-        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "FORMAT BA VERFAL.docx"),
-        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "templates", "FORMAT BERITA ACARA VERFAL.docx"),
-        os.path.join(os.getcwd(), "templates", "FORMAT BERITA ACARA VERFAL.docx"),
-        os.path.join(os.getcwd(), "backend", "templates", "FORMAT BERITA ACARA VERFAL.docx"),
-        os.path.join(os.getcwd(), "FORMAT BA VERFAL.docx")
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates", "FORMAT BA VERFAL.docx"),
+        os.path.join(os.getcwd(), "FORMAT BA VERFAL.docx"),
+        os.path.join(os.getcwd(), "BERITA ACARA.docx")
     ]
     template_path = None
     for candidate in template_candidates:
@@ -2857,7 +2880,7 @@ async def export_verfal_docx(
             break
             
     if not template_path:
-        raise HTTPException(status_code=404, detail="Template FORMAT BERITA ACARA VERFAL.docx tidak ditemukan")
+        raise HTTPException(status_code=404, detail="Template FORMAT BA VERFAL.docx / BERITA ACARA.docx tidak ditemukan")
         
     doc = docx.Document(template_path)
     
@@ -2868,6 +2891,7 @@ async def export_verfal_docx(
         "[Tanggal BA Verfal]": tgl_val,
         "[Bulan BA Verfal]": bln_val,
         "[Tahun BA Verfal]": thn_val,
+        "[Jumlah usulan]": str(total_alokasi_invers),
         "[Total Alokasi Invers]": str(total_alokasi_invers),
         "[Kabupaten Aktif]": kab_name,
         "[Provinsi Aktif]": prov_name,
@@ -2882,180 +2906,19 @@ async def export_verfal_docx(
     
     for p in doc.paragraphs:
         for k, v in replacements.items():
-            if k in p.text:
-                for run in p.runs:
-                    if k in run.text:
-                        run.text = run.text.replace(k, str(v))
-                if k in p.text:
-                    p.text = p.text.replace(k, str(v))
+            replace_docx_placeholder(p, k, str(v))
+
     for t in doc.tables:
         for row in t.rows:
             for cell in row.cells:
                 for p in cell.paragraphs:
                     for k, v in replacements.items():
-                        if k in p.text:
-                            for run in p.runs:
-                                if k in run.text:
-                                    run.text = run.text.replace(k, str(v))
-                            if k in p.text:
-                                p.text = p.text.replace(k, str(v))
-                                
-    # Add Lampiran I (Rekapitulasi)
-    doc.add_page_break()
-    p_lamp1_title = doc.add_paragraph()
-    p_lamp1_title.alignment = docx.enum.text.WD_ALIGN_PARAGRAPH.CENTER
-    r_l1 = p_lamp1_title.add_run(f"LAMPIRAN I BERITA ACARA NOMOR : {nomor_ba_verfal}\nREKAPITULASI HASIL VERIFIKASI FAKTUAL CALON PENERIMA BANTUAN\nBEDAH RUMAH TAHUN {tahun_anggaran}\nKABUPATEN {kab_name} PROVINSI {prov_name}")
-    r_l1.bold = True
-    r_l1.font.name = 'Bookman Old Style'
-    r_l1.font.size = Pt(11)
-    
-    desa_agg = {}
-    for r in records:
-        kec = (r['kecamatan'] or "LAINNYA").strip().upper()
-        desa = (r['desa_kelurahan'] or "LAINNYA").strip().upper()
-        if kec not in desa_agg:
-            desa_agg[kec] = {}
-        if desa not in desa_agg[kec]:
-            desa_agg[kec][desa] = {"alokasi": 0, "lolos": 0, "tidak_lolos": 0, "pengganti": 0}
-            
-        desa_agg[kec][desa]["alokasi"] += 1
-        if r['status'] == 'LOLOS':
-            desa_agg[kec][desa]["lolos"] += 1
-        else:
-            desa_agg[kec][desa]["tidak_lolos"] += 1
-            if r.get('nama_pengganti'):
-                desa_agg[kec][desa]["pengganti"] += 1
-                
-    table_l1 = doc.add_table(rows=1, cols=7)
-    table_l1.style = 'Table Grid'
-    hdr_cells = table_l1.rows[0].cells
-    hdr_titles = ["NO.", "KECAMATAN", "DESA / KELURAHAN", "TOTAL ALOKASI", "LOLOS", "TIDAK LOLOS", "PENGGANTI"]
-    for i, title in enumerate(hdr_titles):
-        hdr_cells[i].text = title
-        hdr_cells[i].paragraphs[0].alignment = docx.enum.text.WD_ALIGN_PARAGRAPH.CENTER
-        for run in hdr_cells[i].paragraphs[0].runs:
-            run.bold = True
-            run.font.name = 'Bookman Old Style'
-            run.font.size = Pt(9)
-            
-    no_idx = 1
-    t_alo = t_lol = t_tdk = t_pg = 0
-    for kec, desas in sorted(desa_agg.items()):
-        for desa, stats in sorted(desas.items()):
-            row_cells = table_l1.add_row().cells
-            row_cells[0].text = str(no_idx)
-            row_cells[1].text = kec
-            row_cells[2].text = desa
-            row_cells[3].text = str(stats["alokasi"])
-            row_cells[4].text = str(stats["lolos"])
-            row_cells[5].text = str(stats["tidak_lolos"])
-            row_cells[6].text = str(stats["pengganti"])
-            
-            t_alo += stats["alokasi"]
-            t_lol += stats["lolos"]
-            t_tdk += stats["tidak_lolos"]
-            t_pg += stats["pengganti"]
-            
-            for i in range(7):
-                p = row_cells[i].paragraphs[0]
-                if i in (0, 3, 4, 5, 6):
-                    p.alignment = docx.enum.text.WD_ALIGN_PARAGRAPH.CENTER
-                for run in p.runs:
-                    run.font.name = 'Bookman Old Style'
-                    run.font.size = Pt(9)
-            no_idx += 1
-            
-    tot_cells = table_l1.add_row().cells
-    tot_cells[0].text = "TOTAL"
-    tot_cells[3].text = str(t_alo)
-    tot_cells[4].text = str(t_lol)
-    tot_cells[5].text = str(t_tdk)
-    tot_cells[6].text = str(t_pg)
-    for i in range(7):
-        p = tot_cells[i].paragraphs[0]
-        if i in (0, 3, 4, 5, 6):
-            p.alignment = docx.enum.text.WD_ALIGN_PARAGRAPH.CENTER
-        for run in p.runs:
-            run.bold = True
-            run.font.name = 'Bookman Old Style'
-            run.font.size = Pt(9)
-            
-    # Add Lampiran II (Daftar Lolos)
-    doc.add_page_break()
-    p_lamp2_title = doc.add_paragraph()
-    p_lamp2_title.alignment = docx.enum.text.WD_ALIGN_PARAGRAPH.CENTER
-    r_l2 = p_lamp2_title.add_run(f"LAMPIRAN II BERITA ACARA NOMOR : {nomor_ba_verfal}\nDAFTAR CALON PENERIMA BANTUAN HASIL VERIFIKASI FAKTUAL (LOLOS)\nBEDAH RUMAH TAHUN {tahun_anggaran}\nKABUPATEN {kab_name} PROVINSI {prov_name}")
-    r_l2.bold = True
-    r_l2.font.name = 'Bookman Old Style'
-    r_l2.font.size = Pt(11)
-    
-    table_l2 = doc.add_table(rows=1, cols=6)
-    table_l2.style = 'Table Grid'
-    hdr_cells2 = table_l2.rows[0].cells
-    hdr_titles2 = ["NO.", "NAMA", "NO. KTP", "NO. KK", "DESA / KELURAHAN", "KECAMATAN"]
-    for i, title in enumerate(hdr_titles2):
-        hdr_cells2[i].text = title
-        hdr_cells2[i].paragraphs[0].alignment = docx.enum.text.WD_ALIGN_PARAGRAPH.CENTER
-        for run in hdr_cells2[i].paragraphs[0].runs:
-            run.bold = True
-            run.font.name = 'Bookman Old Style'
-            run.font.size = Pt(9)
-            
-    for idx, r in enumerate(lolos_records):
-        row_cells = table_l2.add_row().cells
-        row_cells[0].text = str(idx + 1)
-        row_cells[1].text = r['nama'] or ""
-        row_cells[2].text = r['no_ktp'] or ""
-        row_cells[3].text = r['no_kk'] or ""
-        row_cells[4].text = r['desa_kelurahan'] or ""
-        row_cells[5].text = r['kecamatan'] or ""
-        for i in range(6):
-            p = row_cells[i].paragraphs[0]
-            if i in (0, 2, 3):
-                p.alignment = docx.enum.text.WD_ALIGN_PARAGRAPH.CENTER
-            for run in p.runs:
-                run.font.name = 'Bookman Old Style'
-                run.font.size = Pt(8.5)
-                
-    # Add Lampiran III (Daftar Pengganti)
-    doc.add_page_break()
-    p_lamp3_title = doc.add_paragraph()
-    p_lamp3_title.alignment = docx.enum.text.WD_ALIGN_PARAGRAPH.CENTER
-    r_l3 = p_lamp3_title.add_run(f"LAMPIRAN III BERITA ACARA NOMOR : {nomor_ba_verfal}\nDAFTAR CALON PENERIMA BANTUAN PENGGANTI\nBEDAH RUMAH TAHUN {tahun_anggaran}\nKABUPATEN {kab_name} PROVINSI {prov_name}")
-    r_l3.bold = True
-    r_l3.font.name = 'Bookman Old Style'
-    r_l3.font.size = Pt(11)
-    
-    table_l3 = doc.add_table(rows=1, cols=9)
-    table_l3.style = 'Table Grid'
-    hdr_cells3 = table_l3.rows[0].cells
-    hdr_titles3 = ["NO.", "NAMA (TIDAK LOLOS)", "NO. KTP", "DESA", "ALASAN TIDAK LOLOS", "NAMA PENGGANTI", "NO. KTP PENGGANTI", "DESA PENGGANTI", "KETERANGAN"]
-    for i, title in enumerate(hdr_titles3):
-        hdr_cells3[i].text = title
-        hdr_cells3[i].paragraphs[0].alignment = docx.enum.text.WD_ALIGN_PARAGRAPH.CENTER
-        for run in hdr_cells3[i].paragraphs[0].runs:
-            run.bold = True
-            run.font.name = 'Bookman Old Style'
-            run.font.size = Pt(9)
-            
-    for idx, r in enumerate(tidak_lolos_records):
-        row_cells = table_l3.add_row().cells
-        row_cells[0].text = str(idx + 1)
-        row_cells[1].text = r['nama'] or ""
-        row_cells[2].text = r['no_ktp'] or ""
-        row_cells[3].text = r['desa_kelurahan'] or ""
-        row_cells[4].text = r['alasan_tidak_lolos'] or ""
-        row_cells[5].text = r.get('nama_pengganti') or "-"
-        row_cells[6].text = r.get('no_ktp_pengganti') or "-"
-        row_cells[7].text = r.get('desa_kelurahan_pengganti') or (r['desa_kelurahan'] or "")
-        row_cells[8].text = r['keterangan'] or "-"
-        for i in range(9):
-            p = row_cells[i].paragraphs[0]
-            if i in (0, 2, 6):
-                p.alignment = docx.enum.text.WD_ALIGN_PARAGRAPH.CENTER
-            for run in p.runs:
-                run.font.name = 'Bookman Old Style'
-                run.font.size = Pt(8.5)
+                        replace_docx_placeholder(p, k, str(v))
+                        
+    for s in doc.sections:
+        for hp in s.header.paragraphs:
+            for k, v in replacements.items():
+                replace_docx_placeholder(hp, k, str(v))
 
     stream = io.BytesIO()
     doc.save(stream)
@@ -3092,7 +2955,6 @@ async def export_verfal_pdf(
         tanggal_terbit_ba_verfal, alasan_tidak_lolos_terbanyak
     )
     
-    # Read bytes from docx_resp stream
     docx_bytes = b""
     if hasattr(docx_resp, 'body') and docx_resp.body:
         docx_bytes = docx_resp.body
@@ -3186,6 +3048,27 @@ def export_verfal_excel(batch_id: int):
         try: meta = json.loads(batch['metadata_json'])
         except Exception: pass
     tahun_anggaran = meta.get("tahun_anggaran", "2026")
+    nama_pejabat_ketua_tim = meta.get("nama_pejabat_ketua_tim", "")
+    nama_pejabat_kepala_balai = meta.get("nama_pejabat_kepala_balai", "")
+    tanggal_terbit_ba_verfal = meta.get("tanggal_terbit_ba_verfal", "")
+    tanggal_ba = meta.get("tanggal_ba_verfal") or batch.get("tanggal_ba") or ""
+    
+    tgl_val = ""
+    bln_val = ""
+    thn_val = ""
+    months_id = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
+    if tanggal_ba and "-" in str(tanggal_ba):
+        parts = str(tanggal_ba).split("-")
+        if len(parts) == 3:
+            thn_val = parts[0]
+            try:
+                m_idx = int(parts[1]) - 1
+                bln_val = months_id[m_idx] if 0 <= m_idx < 12 else parts[1]
+            except Exception:
+                bln_val = parts[1]
+            tgl_val = str(int(parts[2])) if parts[2].isdigit() else parts[2]
+            
+    tanggal_terbit_display = tanggal_terbit_ba_verfal or (f"{kab_name.title()}, {tgl_val} {bln_val} {thn_val}".strip(", ") if (tgl_val or bln_val) else f"{kab_name.title()}, [Tanggal Terbit Verifikasi]")
     
     cursor.execute("""
         SELECT vr.*, re.nama_pengganti, re.jenis_kelamin_pengganti, re.no_ktp_pengganti,
@@ -3202,57 +3085,62 @@ def export_verfal_excel(batch_id: int):
     lolos_records = [r for r in records if r['status'] == 'LOLOS']
     tidak_lolos_records = [r for r in records if r['status'] == 'TIDAK LOLOS']
     
-    wb = openpyxl.Workbook()
+    template_candidates = [
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "EXPORT_VERFAL.xlsx"),
+        os.path.join(BASE_DIR, "EXPORT_VERFAL.xlsx"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates", "EXPORT_VERFAL.xlsx"),
+        os.path.join(os.getcwd(), "EXPORT_VERFAL.xlsx"),
+        os.path.join(os.getcwd(), "backend", "templates", "EXPORT_VERFAL.xlsx")
+    ]
+    template_path = None
+    for candidate in template_candidates:
+        if os.path.exists(candidate):
+            template_path = candidate
+            break
+            
+    if template_path:
+        wb = openpyxl.load_workbook(template_path)
+    else:
+        wb = openpyxl.Workbook()
+        
+    font_data = Font(name='Bookman Old Style', size=10)
+    font_sig = Font(name='Bookman Old Style', size=14)
+    font_sig_bold = Font(name='Bookman Old Style', size=14, bold=True)
+    align_sig_center = Alignment(horizontal='center', vertical='center')
     
-    font_title = Font(name='Bookman Old Style', size=11, bold=True)
-    font_header = Font(name='Bookman Old Style', size=9, bold=True)
-    font_data = Font(name='Bookman Old Style', size=9)
-    
-    align_center = Alignment(horizontal='center', vertical='center', wrap_text=True)
-    align_left = Alignment(horizontal='left', vertical='center')
     border_thin = Border(
         left=Side(style='thin', color='000000'),
         right=Side(style='thin', color='000000'),
         top=Side(style='thin', color='000000'),
         bottom=Side(style='thin', color='000000')
     )
-    
+    align_center = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    align_left = Alignment(horizontal='left', vertical='center')
+
     # 1. Sheet Lamp.IIA (Lolos & Pengganti Terurut per Desa)
-    ws_iia = wb.active
+    ws_iia = wb["Lamp.IIA"] if "Lamp.IIA" in wb.sheetnames else wb.active
     ws_iia.title = "Lamp.IIA"
     
+    # Page setup: Landscape, 1 page wide, automatic height, 0.5 margins
+    ws_iia.page_setup.orientation = ws_iia.ORIENTATION_LANDSCAPE
+    ws_iia.page_setup.paperSize = ws_iia.PAPERSIZE_A4
+    if ws_iia.sheet_properties and ws_iia.sheet_properties.pageSetUpPr:
+        ws_iia.sheet_properties.pageSetUpPr.fitToPage = True
+    ws_iia.page_setup.fitToWidth = 1
+    ws_iia.page_setup.fitToHeight = 0
+    ws_iia.page_margins.left = 0.5
+    ws_iia.page_margins.right = 0.5
+    ws_iia.page_margins.top = 0.5
+    ws_iia.page_margins.bottom = 0.5
+
     ws_iia['A2'] = "DAFTAR HASIL VERIFIKASI FAKTUAL CALON PENERIMA BANTUAN"
-    ws_iia['A2'].font = font_title
     ws_iia['A3'] = f"BEDAH RUMAH TAHUN {tahun_anggaran}"
-    ws_iia['A3'].font = font_title
     ws_iia['A4'] = f"PROVINSI {prov_name}"
-    ws_iia['A4'].font = font_title
     
-    headers_iia_r6 = ["NO. URUT", "NAMA", "JENIS KELAMIN (L/P)", "NO.KK", "NO.KTP", "ALAMAT TEMPAT TINGGAL", "DESA / KELURAHAN", "KECAMATAN", "KABUPATEN / KOTA", "*) LOLOS / PENGGANTI", "INSTRUKSI VERIFIKASI", None, "KETERANGAN"]
-    for c_idx, h in enumerate(headers_iia_r6, 1):
-        if h:
-            cell = ws_iia.cell(row=6, column=c_idx, value=h)
-            cell.font = font_header
-            cell.alignment = align_center
-            cell.border = border_thin
-            if c_idx not in (11, 12):
-                ws_iia.merge_cells(start_row=6, start_column=c_idx, end_row=7, end_column=c_idx)
-    ws_iia.merge_cells(start_row=6, start_column=11, end_row=6, end_column=12)
-    
-    c_tahap = ws_iia.cell(row=7, column=11, value="TAHAP")
-    c_tahap.font = font_header
-    c_tahap.alignment = align_center
-    c_tahap.border = border_thin
-    
-    c_tgl = ws_iia.cell(row=7, column=12, value="TANGGAL")
-    c_tgl.font = font_header
-    c_tgl.alignment = align_center
-    c_tgl.border = border_thin
-    
-    for r in range(6, 8):
-        for c in range(1, 14):
-            ws_iia.cell(row=r, column=c).border = border_thin
-            
+    # Clear existing data rows if any
+    if ws_iia.max_row >= 8:
+        ws_iia.delete_rows(8, ws_iia.max_row - 7)
+        
     # Kumpulkan seluruh baris Lamp.IIA (Lolos + Pengganti dari Tidak Lolos)
     iia_items = []
     for rec in lolos_records:
@@ -3301,6 +3189,7 @@ def export_verfal_excel(batch_id: int):
     
     r_idx = 8
     for idx, item in enumerate(iia_items, 1):
+        ws_iia.row_dimensions[r_idx].height = 28.05
         vals = [
             idx,
             item['nama'],
@@ -3326,98 +3215,156 @@ def export_verfal_excel(batch_id: int):
                 cell.alignment = align_left
         r_idx += 1
         
-    # 2. Sheet Lamp.IIIA (Daftar Tidak Lolos & Pengganti Lengkap dengan NO.KK Pengganti)
-    ws_iiia = wb.create_sheet("Lamp.IIIA")
+    # Tanda Tangan Lamp.IIA (Pic 1)
+    row_sig_iia = r_idx + 2
+    ws_iia.cell(row=row_sig_iia, column=11, value=tanggal_terbit_display).font = font_sig
+    ws_iia.cell(row=row_sig_iia, column=11).alignment = align_sig_center
+    
+    ws_iia.cell(row=row_sig_iia + 1, column=11, value="Pelaksana/Ketua Tim Verifikasi Faktual,").font = font_sig
+    ws_iia.cell(row=row_sig_iia + 1, column=11).alignment = align_sig_center
+    
+    ws_iia.cell(row=row_sig_iia + 5, column=11, value=nama_pejabat_ketua_tim or "( ................................................. )").font = font_sig
+    ws_iia.cell(row=row_sig_iia + 5, column=11).alignment = align_sig_center
+
+    # 2. Sheet Lamp.IIIA (Daftar Tidak Lolos & Pengganti Lengkap)
+    ws_iiia = wb["Lamp.IIIA"] if "Lamp.IIIA" in wb.sheetnames else wb.create_sheet("Lamp.IIIA")
+    ws_iiia.title = "Lamp.IIIA"
+    
+    # Page setup: Landscape, 1 page wide, automatic height, 0.5 margins
+    ws_iiia.page_setup.orientation = ws_iiia.ORIENTATION_LANDSCAPE
+    ws_iiia.page_setup.paperSize = ws_iiia.PAPERSIZE_A4
+    if ws_iiia.sheet_properties and ws_iiia.sheet_properties.pageSetUpPr:
+        ws_iiia.sheet_properties.pageSetUpPr.fitToPage = True
+    ws_iiia.page_setup.fitToWidth = 1
+    ws_iiia.page_setup.fitToHeight = 0
+    ws_iiia.page_margins.left = 0.5
+    ws_iiia.page_margins.right = 0.5
+    ws_iiia.page_margins.top = 0.5
+    ws_iiia.page_margins.bottom = 0.5
+
     ws_iiia['A2'] = "DAFTAR CALON PENGGANTI CALON PENERIMA BANTUAN"
-    ws_iiia['A2'].font = font_title
     ws_iiia['A3'] = f"BEDAH RUMAH TAHUN {tahun_anggaran}"
-    ws_iiia['A3'].font = font_title
     ws_iiia['A4'] = f"PROVINSI {prov_name}"
-    ws_iiia['A4'].font = font_title
+
+    # Determine columns layout from template header row 7
+    is_21_cols = (ws_iiia.cell(row=7, column=14).value and 'NO.KK' in str(ws_iiia.cell(row=7, column=14).value).upper())
     
-    c_no = ws_iiia.cell(row=6, column=1, value="NO.")
-    c_no.font = font_header
-    c_no.alignment = align_center
-    ws_iiia.merge_cells(start_row=6, start_column=1, end_row=7, end_column=1)
-    
-    c_tl = ws_iiia.cell(row=6, column=2, value="TIDAK LOLOS")
-    c_tl.font = font_header
-    c_tl.alignment = align_center
-    ws_iiia.merge_cells(start_row=6, start_column=2, end_row=6, end_column=9)
-    
-    tl_sub = ["NAMA", "JENIS KELAMIN (L/P)", "NO.KTP", "ALAMAT TEMPAT TINGGAL", "DESA / KELURAHAN", "KECAMATAN", "KABUPATEN", "ALASAN TIDAK LOLOS *)"]
-    for i, sub in enumerate(tl_sub, 2):
-        cell = ws_iiia.cell(row=7, column=i, value=sub)
-        cell.font = font_header
-        cell.alignment = align_center
-        
-    c_sesudah = ws_iiia.cell(row=6, column=10, value="SEMUA")
-    c_sesudah.font = font_header
-    c_sesudah.alignment = align_center
-    ws_iiia.merge_cells(start_row=6, start_column=10, end_row=6, end_column=18)
-    
-    pg_sub = ["BNBA", "NAMA (PENGGANTI)", "JENIS KELAMIN (L/P)", "NO.KTP (PENGGANTI)", "NO.KK (PENGGANTI)", "ALAMAT TEMPAT TINGGAL", "DESA / KELURAHAN", "KECAMATAN", "KABUPATEN"]
-    for i, sub in enumerate(pg_sub, 10):
-        cell = ws_iiia.cell(row=7, column=i, value=sub)
-        cell.font = font_header
-        cell.alignment = align_center
-        
-    c_inst = ws_iiia.cell(row=6, column=19, value="INSTRUKSI VERIFIKASI")
-    c_inst.font = font_header
-    c_inst.alignment = align_center
-    ws_iiia.merge_cells(start_row=6, start_column=19, end_row=6, end_column=20)
-    
-    c_tahap3 = ws_iiia.cell(row=7, column=19, value="TAHAP")
-    c_tahap3.font = font_header
-    c_tahap3.alignment = align_center
-    
-    c_tgl3 = ws_iiia.cell(row=7, column=20, value="TANGGAL")
-    c_tgl3.font = font_header
-    c_tgl3.alignment = align_center
-    
-    c_ket3 = ws_iiia.cell(row=6, column=21, value="KETERANGAN")
-    c_ket3.font = font_header
-    c_ket3.alignment = align_center
-    ws_iiia.merge_cells(start_row=6, start_column=21, end_row=7, end_column=21)
-    
-    for r in range(6, 8):
-        for c in range(1, 22):
-            ws_iiia.cell(row=r, column=c).border = border_thin
+    if ws_iiia.max_row >= 8:
+        ws_iiia.delete_rows(8, ws_iiia.max_row - 7)
             
     r_idx = 8
     for idx, rec in enumerate(tidak_lolos_records, 1):
-        vals = [
-            idx,
-            rec['nama'],
-            rec['jenis_kelamin'],
-            rec['no_ktp'],
-            rec['alamat'],
-            rec['desa_kelurahan'],
-            rec['kecamatan'],
-            rec['kabupaten_kota'] or kab_name,
-            rec['alasan_tidak_lolos'],
-            "", # BNBA
-            rec.get('nama_pengganti') or "",
-            rec.get('jenis_kelamin_pengganti') or "",
-            rec.get('no_ktp_pengganti') or "",
-            rec.get('no_kk_pengganti') or "",
-            rec.get('alamat_pengganti') or "",
-            rec.get('desa_kelurahan_pengganti') or "",
-            rec.get('kecamatan_pengganti') or "",
-            rec.get('kabupaten_pengganti') or kab_name,
-            rec['tahap'] or stage_name,
-            rec['tanggal'] or batch.get('tanggal_ba') or "",
-            rec['keterangan'] or ""
-        ]
+        ws_iiia.row_dimensions[r_idx].height = 28.05
+        if is_21_cols:
+            vals = [
+                idx,
+                rec['nama'],
+                rec['jenis_kelamin'],
+                rec['no_ktp'],
+                rec['alamat'],
+                rec['desa_kelurahan'],
+                rec['kecamatan'],
+                rec['kabupaten_kota'] or kab_name,
+                rec['alasan_tidak_lolos'],
+                "", # BNBA
+                rec.get('nama_pengganti') or "",
+                rec.get('jenis_kelamin_pengganti') or "",
+                rec.get('no_ktp_pengganti') or "",
+                rec.get('no_kk_pengganti') or "",
+                rec.get('alamat_pengganti') or "",
+                rec.get('desa_kelurahan_pengganti') or "",
+                rec.get('kecamatan_pengganti') or "",
+                rec.get('kabupaten_pengganti') or kab_name,
+                rec['tahap'] or stage_name,
+                rec['tanggal'] or batch.get('tanggal_ba') or "",
+                rec['keterangan'] or ""
+            ]
+            center_cols = {1, 3, 4, 9, 10, 12, 13, 14, 19, 20}
+        else:
+            vals = [
+                idx,
+                rec['nama'],
+                rec['jenis_kelamin'],
+                rec['no_ktp'],
+                rec['alamat'],
+                rec['desa_kelurahan'],
+                rec['kabupaten_kota'] or kab_name,
+                rec['alasan_tidak_lolos'],
+                "", # BNBA
+                rec.get('nama_pengganti') or "",
+                rec.get('jenis_kelamin_pengganti') or "",
+                rec.get('no_ktp_pengganti') or "",
+                rec.get('alamat_pengganti') or "",
+                rec.get('desa_kelurahan_pengganti') or "",
+                rec.get('kabupaten_pengganti') or kab_name,
+                rec['tahap'] or stage_name,
+                rec['tanggal'] or batch.get('tanggal_ba') or "",
+                rec['keterangan'] or ""
+            ]
+            center_cols = {1, 3, 4, 8, 9, 11, 12, 16, 17}
+            
         for c_idx, v in enumerate(vals, 1):
             cell = ws_iiia.cell(row=r_idx, column=c_idx, value=v)
             cell.font = font_data
             cell.border = border_thin
-            if c_idx in (1, 3, 4, 9, 10, 12, 13, 14, 19, 20):
+            if c_idx in center_cols:
                 cell.alignment = align_center
             else:
                 cell.alignment = align_left
         r_idx += 1
+        
+    # Tanda Tangan & Catatan Lamp.IIIA (Pic 2)
+    row_sig_iiia = r_idx + 2
+    col_left = 5
+    col_right = 18 if is_21_cols else 15
+    
+    # Left: Mengetahui - Kepala Balai
+    ws_iiia.cell(row=row_sig_iiia, column=col_left, value="Mengetahui,").font = font_sig
+    ws_iiia.cell(row=row_sig_iiia, column=col_left).alignment = align_sig_center
+    
+    ws_iiia.cell(row=row_sig_iiia + 1, column=col_left, value="Kepala Balai Pelaksana ").font = font_sig
+    ws_iiia.cell(row=row_sig_iiia + 1, column=col_left).alignment = align_sig_center
+    
+    ws_iiia.cell(row=row_sig_iiia + 2, column=col_left, value="Penyediaan Perumahan dan ").font = font_sig
+    ws_iiia.cell(row=row_sig_iiia + 2, column=col_left).alignment = align_sig_center
+    
+    ws_iiia.cell(row=row_sig_iiia + 3, column=col_left, value="Kawasan Permukiman Sulawesi III,").font = font_sig
+    ws_iiia.cell(row=row_sig_iiia + 3, column=col_left).alignment = align_sig_center
+    
+    ws_iiia.cell(row=row_sig_iiia + 7, column=col_left, value=nama_pejabat_kepala_balai or "( ................................................. )").font = font_sig
+    ws_iiia.cell(row=row_sig_iiia + 7, column=col_left).alignment = align_sig_center
+
+    # Right: Pelaksana/Ketua Tim Verifikasi Faktual
+    ws_iiia.cell(row=row_sig_iiia, column=col_right, value=tanggal_terbit_display).font = font_sig
+    ws_iiia.cell(row=row_sig_iiia, column=col_right).alignment = align_sig_center
+    
+    ws_iiia.cell(row=row_sig_iiia + 1, column=col_right, value="Pelaksana/Ketua Tim ").font = font_sig
+    ws_iiia.cell(row=row_sig_iiia + 1, column=col_right).alignment = align_sig_center
+    
+    ws_iiia.cell(row=row_sig_iiia + 2, column=col_right, value="Verifikasi Faktual,").font = font_sig
+    ws_iiia.cell(row=row_sig_iiia + 2, column=col_right).alignment = align_sig_center
+    
+    ws_iiia.cell(row=row_sig_iiia + 7, column=col_right, value=nama_pejabat_ketua_tim or "( ................................................. )").font = font_sig
+    ws_iiia.cell(row=row_sig_iiia + 7, column=col_right).alignment = align_sig_center
+
+    # Notes (Catatan)
+    row_notes = row_sig_iiia + 13
+    notes_list = [
+        ("Catatan:", True),
+        ("*) Alasan Tidak Lolos, diisi dengan angka (1-8) sebagai berikut:", False),
+        ("1. Belum memiliki KK sendiri;", False),
+        ("2. Tanah bersengketa;", False),
+        ("3. Rumah dalam kondisi layak;", False),
+        ("4. Memiliki rumah lebih dari 1;", False),
+        ("5. Pernah memperoleh bantuan dari APBN/APBD/CSR/anggaran lainnya;", False),
+        ("6. Penghasilan lebih dari UMP;", False),
+        ("7. Memilih untuk dibantu dengan sumber anggaran lain;", False),
+        ("8. Menghuni kurang dari 3 tahun;", False),
+        ("9. Lainnya (diisi pada kolom keterangan);", False)
+    ]
+    for n_idx, (ntxt, is_b) in enumerate(notes_list):
+        cell_n = ws_iiia.cell(row=row_notes + n_idx, column=1, value=ntxt)
+        cell_n.font = Font(name='Bookman Old Style', size=14, bold=is_b)
         
     stream = io.BytesIO()
     wb.save(stream)

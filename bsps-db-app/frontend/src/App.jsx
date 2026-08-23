@@ -1160,7 +1160,7 @@ function App() {
       nama_pejabat_ketua_tim: meta.nama_pejabat_ketua_tim || '',
       nama_pejabat_kepala_balai: meta.nama_pejabat_kepala_balai || '',
       tanggal_terbit_ba_verfal: meta.tanggal_terbit_ba_verfal || '',
-      alasan_tidak_lolos_terbanyak: meta.alasan_tidak_lolos_terbanyak || ''
+      alasan_tidak_lolos_terbanyak: meta.alasan_tidak_lolos_terbanyak || batch.alasan_tidak_lolos_terbanyak || ''
     });
     setShowVerfalWordModal(true);
   };
@@ -4337,28 +4337,35 @@ function App() {
                           <span className="verfal-kab-name">{group.kabupaten}</span>
                         </div>
 
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                          <div className="verfal-badges-group">
-                            <span className="verfal-pill alokasi" title="Alokasi Data INVERS">
-                              Alokasi: {group.total_alokasi_invers}
-                            </span>
-                            <span className="verfal-pill verif" title="Total Verifikasi (Verfal + Reguler)">
-                              Verif: {group.totals.verifikasi} (Verfal: {group.totals.verfal?.verifikasi || 0} | Reg: {group.totals.regular?.verifikasi || 0})
-                            </span>
-                            <span className="verfal-pill lolos" title="Rekomendasi (Lolos)">
-                              Lolos: {group.totals.lolos}
-                            </span>
-                            <span className="verfal-pill tidak" title="Tidak Lolos">
-                              Tidak Lolos: {group.totals.tidak_lolos}
-                            </span>
-                            {group.totals.pengganti > 0 && (
-                              <span className="verfal-pill pengganti" title="Calon Pengganti">
-                                Pengganti: {group.totals.pengganti}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                          <div className="verfal-grid-metrics">
+                            <div className="verfal-metric-col col-alokasi" title="Alokasi Data INVERS">
+                              <span className="metric-label">Alokasi</span>
+                              <span className="metric-value">{group.total_alokasi_invers}</span>
+                            </div>
+                            <div className="verfal-metric-col col-verif" title={`Verifikasi Gabungan: Verfal (${group.totals.verfal?.verifikasi || 0}) | Reguler (${group.totals.regular?.verifikasi || 0})`}>
+                              <span className="metric-label">Verifikasi</span>
+                              <span className="metric-value">{group.totals.verifikasi}</span>
+                              <span className="metric-sub">{group.totals.verfal?.verifikasi || 0} | {group.totals.regular?.verifikasi || 0}</span>
+                            </div>
+                            <div className="verfal-metric-col col-lolos" title="Rekomendasi (Lolos)">
+                              <span className="metric-label">Lolos</span>
+                              <span className="metric-value">{group.totals.lolos}</span>
+                            </div>
+                            <div className="verfal-metric-col col-tidak" title="Tidak Lolos">
+                              <span className="metric-label">Tdk Lolos</span>
+                              <span className="metric-value">{group.totals.tidak_lolos}</span>
+                            </div>
+                            <div className="verfal-metric-col col-pengganti" title="Calon Pengganti">
+                              <span className="metric-label">Pengganti</span>
+                              <span className={`metric-value ${group.totals.pengganti > 0 ? 'has-val' : 'is-zero'}`}>
+                                {group.totals.pengganti > 0 ? group.totals.pengganti : '-'}
                               </span>
-                            )}
-                            <span className="verfal-pill belum" title="Sisa Belum Terverifikasi">
-                              Sisa: {group.totals.belum_verifikasi}
-                            </span>
+                            </div>
+                            <div className="verfal-metric-col col-sisa" title="Sisa Belum Terverifikasi">
+                              <span className="metric-label">Sisa</span>
+                              <span className="metric-value">{group.totals.belum_verifikasi}</span>
+                            </div>
                           </div>
 
                           {isAdmin && (
@@ -4372,7 +4379,7 @@ function App() {
                                 setVerfalUploadFile(null);
                                 setShowVerfalUploadModal(true);
                               }}
-                              style={{ fontSize: '0.78rem', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                              style={{ fontSize: '0.78rem', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '4px', height: '36px' }}
                               title={`Unggah BA Verfal baru khusus ${group.kabupaten}`}
                             >
                               <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
