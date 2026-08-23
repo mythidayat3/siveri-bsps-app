@@ -117,10 +117,23 @@ def init_db():
         cursor.execute("SELECT tanggal_ba FROM verified_batches LIMIT 1")
     except Exception:
         cursor.execute("ALTER TABLE verified_batches ADD COLUMN tanggal_ba TEXT")
+    # Migration: add sort_order to verified_batches if missing
     try:
         cursor.execute("SELECT sort_order FROM verified_batches LIMIT 1")
     except Exception:
         cursor.execute("ALTER TABLE verified_batches ADD COLUMN sort_order INTEGER DEFAULT 0")
+    try:
+        cursor.execute("SELECT batch_type FROM verified_batches LIMIT 1")
+    except Exception:
+        cursor.execute("ALTER TABLE verified_batches ADD COLUMN batch_type TEXT DEFAULT 'REGULAR'")
+    try:
+        cursor.execute("SELECT kabupaten FROM verified_batches LIMIT 1")
+    except Exception:
+        cursor.execute("ALTER TABLE verified_batches ADD COLUMN kabupaten TEXT")
+    try:
+        cursor.execute("SELECT metadata_json FROM verified_batches LIMIT 1")
+    except Exception:
+        cursor.execute("ALTER TABLE verified_batches ADD COLUMN metadata_json TEXT")
     
     # 5. Verified Records
     cursor.execute("""
@@ -177,10 +190,15 @@ def init_db():
         corrected_no_ktp TEXT,
         corrected_no_kk TEXT,
         overridden_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(stage_id, original_no_ktp),
+        batch_type TEXT DEFAULT 'REGULAR',
         FOREIGN KEY(stage_id) REFERENCES invers_stages(id) ON DELETE CASCADE
     )
     """)
+
+    try:
+        cursor.execute("SELECT batch_type FROM reconciliation_overrides LIMIT 1")
+    except Exception:
+        cursor.execute("ALTER TABLE reconciliation_overrides ADD COLUMN batch_type TEXT DEFAULT 'REGULAR'")
     
     # 8. SK Dirjen Batches
     cursor.execute("""

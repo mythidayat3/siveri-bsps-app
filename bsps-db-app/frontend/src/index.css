@@ -3739,5 +3739,169 @@ body {
   }
 }
 
+/* --- VERIFIKASI FAKTUAL (VERFAL) STYLES --- */
+.verfal-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
 
+.verfal-kabupaten-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
 
+.verfal-kabupaten-card:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  border-color: rgba(30, 58, 138, 0.25);
+}
+
+.verfal-kabupaten-header {
+  padding: 16px 20px;
+  background: var(--bg-header, #f8fafc);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+  border-bottom: 1px solid transparent;
+  transition: background 0.15s ease;
+}
+
+.dark .verfal-kabupaten-header {
+  background: #1e293b;
+}
+
+.verfal-kabupaten-header.expanded {
+  border-bottom-color: var(--border);
+}
+
+.verfal-kabupaten-header:hover {
+  background: #f1f5f9;
+}
+
+.dark .verfal-kabupaten-header:hover {
+  background: #273549;
+}
+
+.verfal-kab-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.verfal-kab-name {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text-main);
+  letter-spacing: -0.01em;
+}
+
+.verfal-badges-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.verfal-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.verfal-pill.alokasi {
+  background: #e0e7ff;
+  color: #3730a3;
+}
+.dark .verfal-pill.alokasi {
+  background: #312e81;
+  color: #c7d2fe;
+}
+
+.verfal-pill.verif {
+  background: #e2e8f0;
+  color: #1e293b;
+}
+.dark .verfal-pill.verif {
+  background: #334155;
+  color: #f8fafc;
+}
+
+.verfal-pill.lolos {
+  background: #dcfce7;
+  color: #166534;
+}
+.dark .verfal-pill.lolos {
+  background: #14532d;
+  color: #86efac;
+}
+
+.verfal-pill.tidak {
+  background: #fee2e2;
+  color: #991b1b;
+}
+.dark .verfal-pill.tidak {
+  background: #451a1a;
+  color: #fca5a5;
+}
+
+.verfal-pill.pengganti {
+  background: #fef3c7;
+  color: #92400e;
+}
+.dark .verfal-pill.pengganti {
+  background: #451a03;
+  color: #fde68a;
+}
+
+.verfal-pill.belum {
+  background: #f1f5f9;
+  color: #64748b;
+}
+.dark .verfal-pill.belum {
+  background: #1e293b;
+  color: #94a3b8;
+}
+
+.reconciliation-type-toggle {
+  display: inline-flex;
+  background: #f1f5f9;
+  border-radius: 8px;
+  padding: 4px;
+  gap: 4px;
+  border: 1px solid var(--border);
+}
+.dark .reconciliation-type-toggle {
+  background: #1e293b;
+}
+
+.reconciliation-type-toggle button {
+  padding: 6px 16px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.reconciliation-type-toggle button.active {
+  background: var(--bg-card, #ffffff);
+  color: var(--primary);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+}
+.dark .reconciliation-type-toggle button.active {
+  background: #334155;
+  color: #60a5fa;
+}

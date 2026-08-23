@@ -797,6 +797,41 @@ function App() {
     setTimeout(() => setToast(null), 4000);
   };
 
+  // State Verifikasi Faktual (Verfal)
+  const [verfalData, setVerfalData] = useState({ kabupaten_groups: [], grand_totals: {} });
+  const [verfalLoading, setVerfalLoading] = useState(false);
+  const [expandedVerfalKabupatens, setExpandedVerfalKabupatens] = useState(new Set());
+  const [showVerfalUploadModal, setShowVerfalUploadModal] = useState(false);
+  const [verfalUploadKabupaten, setVerfalUploadKabupaten] = useState('');
+  const [verfalUploadBatchName, setVerfalUploadBatchName] = useState('');
+  const [verfalUploadFile, setVerfalUploadFile] = useState(null);
+  const [verfalUploadLoading, setVerfalUploadLoading] = useState(false);
+  
+  const [showVerfalWordModal, setShowVerfalWordModal] = useState(false);
+  const [selectedVerfalBatchForWord, setSelectedVerfalBatchForWord] = useState(null);
+  const [verfalWordFormData, setVerfalWordFormData] = useState({
+    nomor_ba_verfal: '',
+    tahun_anggaran: '2026',
+    nomor_ba_versul: '',
+    tanggal_ba_verfal: '',
+    total_alokasi_versul: '',
+    total_alokasi_invers: '',
+    nama_pejabat_ketua_tim: '',
+    nama_pejabat_kepala_balai: '',
+    tanggal_terbit_ba_verfal: '',
+    alasan_tidak_lolos_terbanyak: ''
+  });
+  const [verfalWordExportLoading, setVerfalWordExportLoading] = useState(false);
+  const [draggedVerfalBatch, setDraggedVerfalBatch] = useState(null);
+
+  // State Rekonsiliasi Batch Type Filter ('ALL' vs 'REGULAR' vs 'VERFAL')
+  const [reconciliationBatchType, setReconciliationBatchType] = useState('ALL');
+
+  // State Rekap BA Verfal
+  const [rekapBatchVerfalData, setRekapBatchVerfalData] = useState(null);
+  const [rekapBatchVerfalLoading, setRekapBatchVerfalLoading] = useState(false);
+  const [rekapBatchVerfalPublishedOnly, setRekapBatchVerfalPublishedOnly] = useState(1);
+
   // State Multi-Provinsi
   const [provinces, setProvinces] = useState([]);
   const [selectedProvinceId, setSelectedProvinceId] = useState(() => {
@@ -980,6 +1015,33 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showWordModal, selectedBatchIdForWord, selectedStageId, stageSummary]);
 
+  const fetchVerfalBatches = async (stageId = selectedStageId) => {
+    if (!stageId) return;
+    setVerfalLoading(true);
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/stage/${stageId}/verfal-batches-grouped`);
+      if (!res.ok) throw new Error("Gagal mengambil data Verfal");
+      const data = await res.json();
+      setVerfalData(data);
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setVerfalLoading(false);
+    }
+  };
+
+  const fetchStageRecords = async (stageId = selectedStageId, batchType = reconciliationBatchType || 'ALL') => {
+    if (!stageId) return;
+    try {
+      const recRes = await fetch(`${BACKEND_URL}/api/stage/${stageId}/records?batch_type=${batchType}`);
+      if (!recRes.ok) throw new Error("Gagal mengambil rekaman data");
+      const recData = await recRes.json();
+      setRecordsData(recData);
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  };
+
   const fetchStageData = async (stageId) => {
     setBatchBreakdownCache({});
     setExpandedBatchId(null);
@@ -991,7 +1053,7 @@ function App() {
       setStageSummary(sumData);
 
       // 2. Ambil Rekaman Data
-      const recRes = await fetch(`${BACKEND_URL}/api/stage/${stageId}/records`);
+      const recRes = await fetch(`${BACKEND_URL}/api/stage/${stageId}/records?batch_type=${reconciliationBatchType || 'ALL'}`);
       if (!recRes.ok) throw new Error("Gagal mengambil rekaman data");
       const recData = await recRes.json();
       setRecordsData(recData);
@@ -1023,8 +1085,194 @@ function App() {
         const kabTreeData = await kabTreeRes.json();
         setKabPengusulTree(kabTreeData);
       }
+
+      // 7. Ambil Verfal Batches
+      fetchVerfalBatches(stageId);
     } catch (err) {
       showToast(err.message, 'error');
+    }
+  };
+
+  const handleVerfalUpload = async (e) => {
+    e.preventDefault();
+    if (!selectedStageId) {
+      showToast("Pilih Tahap INVERS terlebih dahulu", "error");
+      return;
+    }
+    if (!verfalUploadKabupaten) {
+      showToast("Pilih Kabupaten untuk Verifikasi Faktual", "error");
+      return;
+    }
+    if (!verfalUploadFile) {
+      showToast("Pilih file Excel (.xlsx) terlebih dahulu", "error");
+      return;
+    }
+    setVerfalUploadLoading(true);
+    try {
+      const formData = new FormData();
+      formData.append('stage_id', selectedStageId);
+      formData.append('kabupaten', verfalUploadKabupaten);
+      formData.append('batch_name', verfalUploadBatchName || 'BA-1');
+      formData.append('file', verfalUploadFile);
+
+      const res = await fetch(`${BACKEND_URL}/api/verfal/upload`, {
+        method: 'POST',
+        body: formData
+      });
+      if (!res.ok) {
+        let errMsg = "Gagal mengunggah file Verfal";
+        try {
+          const errData = await res.json();
+          errMsg = errData.detail || errMsg;
+        } catch (e) {
+          errMsg = `Error ${res.status}: ${res.statusText}`;
+        }
+        throw new Error(errMsg);
+      }
+      const data = await res.json();
+
+      showToast(`Berhasil mengunggah Verfal ${data.kabupaten}! ${data.stats.lolos} Lolos, ${data.stats.tidak_lolos} Tidak Lolos`, "success");
+      setShowVerfalUploadModal(false);
+      setVerfalUploadFile(null);
+      setVerfalUploadBatchName('');
+      fetchVerfalBatches(selectedStageId);
+      fetchStageData(selectedStageId);
+    } catch (err) {
+      showToast(err.message || "Gagal menghubungi server", "error");
+    } finally {
+      setVerfalUploadLoading(false);
+    }
+  };
+
+  const handleOpenVerfalWordModal = (batch, kab) => {
+    setSelectedVerfalBatchForWord(batch);
+    let meta = {};
+    if (batch.metadata_json) {
+      try { meta = JSON.parse(batch.metadata_json); } catch (e) {}
+    }
+    setVerfalWordFormData({
+      nomor_ba_verfal: meta.nomor_ba_verfal || batch.nomor_ba || '',
+      tahun_anggaran: meta.tahun_anggaran || '2026',
+      nomor_ba_versul: meta.nomor_ba_versul || '',
+      tanggal_ba_verfal: meta.tanggal_ba_verfal || batch.tanggal_ba || new Date().toISOString().split('T')[0],
+      total_alokasi_versul: meta.total_alokasi_versul || (batch.verifikasi_count || ''),
+      total_alokasi_invers: meta.total_alokasi_invers || kab?.total_alokasi_invers || '',
+      nama_pejabat_ketua_tim: meta.nama_pejabat_ketua_tim || '',
+      nama_pejabat_kepala_balai: meta.nama_pejabat_kepala_balai || '',
+      tanggal_terbit_ba_verfal: meta.tanggal_terbit_ba_verfal || '',
+      alasan_tidak_lolos_terbanyak: meta.alasan_tidak_lolos_terbanyak || ''
+    });
+    setShowVerfalWordModal(true);
+  };
+
+  const handleVerfalWordExport = async (format = 'docx') => {
+    if (!selectedVerfalBatchForWord) return;
+    setVerfalWordExportLoading(true);
+    try {
+      const formData = new FormData();
+      formData.append('batch_id', selectedVerfalBatchForWord.id);
+      formData.append('nomor_ba_verfal', verfalWordFormData.nomor_ba_verfal);
+      formData.append('tahun_anggaran', verfalWordFormData.tahun_anggaran);
+      formData.append('nomor_ba_versul', verfalWordFormData.nomor_ba_versul);
+      formData.append('tanggal_ba_verfal', verfalWordFormData.tanggal_ba_verfal);
+      formData.append('total_alokasi_versul', verfalWordFormData.total_alokasi_versul);
+      formData.append('total_alokasi_invers', verfalWordFormData.total_alokasi_invers);
+      formData.append('nama_pejabat_ketua_tim', verfalWordFormData.nama_pejabat_ketua_tim);
+      formData.append('nama_pejabat_kepala_balai', verfalWordFormData.nama_pejabat_kepala_balai);
+      formData.append('tanggal_terbit_ba_verfal', verfalWordFormData.tanggal_terbit_ba_verfal);
+      formData.append('alasan_tidak_lolos_terbanyak', verfalWordFormData.alasan_tidak_lolos_terbanyak);
+
+      const endpoint = format === 'pdf' ? '/api/export/verfal/pdf' : '/api/export/verfal/docx';
+      const res = await fetch(`${BACKEND_URL}${endpoint}`, {
+        method: 'POST',
+        body: formData
+      });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.detail || "Gagal mengekspor dokumen BA Verfal");
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `BA_VERFAL_${(selectedVerfalBatchForWord.kabupaten || 'KAB').replace(/\s+/g, '_')}_${selectedVerfalBatchForWord.name}.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      showToast(`Dokumen BA Verfal (.${format}) berhasil diunduh!`, "success");
+      setShowVerfalWordModal(false);
+      fetchVerfalBatches();
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      setVerfalWordExportLoading(false);
+    }
+  };
+
+  const handleVerfalBatchDragStart = (e, batch, kab) => {
+    setDraggedVerfalBatch({ batch, kab });
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleVerfalBatchDrop = async (e, dropBatch, kab) => {
+    e.preventDefault();
+    if (!draggedVerfalBatch || draggedVerfalBatch.kab !== kab || draggedVerfalBatch.batch.id === dropBatch.id) {
+      setDraggedVerfalBatch(null);
+      return;
+    }
+    
+    const groups = [...(verfalData?.kabupaten_groups || [])];
+    const kabGroup = groups.find(g => g.kabupaten === kab);
+    if (!kabGroup) return;
+
+    const batches = [...kabGroup.batches];
+    const fromIdx = batches.findIndex(b => b.id === draggedVerfalBatch.batch.id);
+    const toIdx = batches.findIndex(b => b.id === dropBatch.id);
+    if (fromIdx < 0 || toIdx < 0) return;
+
+    const [moved] = batches.splice(fromIdx, 1);
+    batches.splice(toIdx, 0, moved);
+    kabGroup.batches = batches;
+
+    setVerfalData(prev => ({ ...prev, kabupaten_groups: groups }));
+    setDraggedVerfalBatch(null);
+
+    const orders = batches.map((b, idx) => ({ id: b.id, sort_order: idx + 1 }));
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/verified/batches/reorder`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orders })
+      });
+      if (res.ok) {
+        showToast('Urutan Berita Acara Verfal berhasil diperbarui', 'success');
+      }
+    } catch (err) {
+      showToast('Gagal menyimpan urutan batch Verfal', 'error');
+    }
+  };
+
+  const toggleVerfalAccordion = (kab) => {
+    setExpandedVerfalKabupatens(prev => {
+      const next = new Set(prev);
+      if (next.has(kab)) next.delete(kab);
+      else next.add(kab);
+      return next;
+    });
+  };
+
+  const fetchRekapBatchVerfal = async (publishedOnly = rekapBatchVerfalPublishedOnly) => {
+    setRekapBatchVerfalLoading(true);
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/rekap-batch-verfal?published_only=${publishedOnly}&province_id=${selectedProvinceId}`);
+      if (!res.ok) throw new Error("Gagal mengambil data Rekap BA Verfal");
+      const data = await res.json();
+      setRekapBatchVerfalData(data);
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      setRekapBatchVerfalLoading(false);
     }
   };
 
@@ -3025,6 +3273,13 @@ function App() {
               <IconVerified /> Data Terverifikasi
             </li>
             <li 
+              className={`menu-item ${activeTab === 'verfal' ? 'active' : ''}`}
+              onClick={() => { setActiveTab('verfal'); fetchVerfalBatches(selectedStageId); setMobileMenuOpen(false); }}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "8px", verticalAlign: "middle" }}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+              Verifikasi Faktual (Verfal)
+            </li>
+            <li 
               className={`menu-item has-submenu ${activeTab === 'sk-dirjen' ? 'active' : ''}`}
             >
               <div style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
@@ -3082,6 +3337,13 @@ function App() {
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
               Rekap Batch BA
+            </li>
+            <li 
+              className={`menu-item ${activeTab === 'rekap-batch-verfal' ? 'active' : ''}`}
+              onClick={() => { setActiveTab('rekap-batch-verfal'); fetchRekapBatchVerfal(); setMobileMenuOpen(false); }}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "8px", verticalAlign: "middle" }}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><polyline points="9 15 12 12 15 15"></polyline></svg>
+              Rekap BA Verfal
             </li>
             <li 
               className={`menu-item ${activeTab === 'global-search' ? 'active' : ''}`}
@@ -3293,26 +3555,32 @@ function App() {
               <div className="metric-card accent-blue">
                 <span className="metric-title">Total Verifikasi</span>
                 <span className="metric-value">
-                  {(stageSummary?.totals?.lolos || 0) + (stageSummary?.totals?.tidak_lolos || 0)}
+                  {stageSummary?.totals?.total_verified || 0}
                 </span>
-                <span className="metric-subtext">Pengusulan BA (Lolos + Tidak Lolos)</span>
+                <span className="metric-subtext">
+                  Reguler: <strong>{stageSummary?.totals?.regular?.total || 0}</strong> • Verfal: <strong>{stageSummary?.totals?.verfal?.total || 0}</strong>
+                </span>
               </div>
               <div className="metric-card accent-amber">
                 <span className="metric-title">Belum Diverifikasi</span>
                 <span className="metric-value">
-                  {Math.max(0, (recordsData?.invers_records?.length || 0) - ((stageSummary?.totals?.lolos || 0) + (stageSummary?.totals?.tidak_lolos || 0)))}
+                  {Math.max(0, (recordsData?.invers_records?.length || 0) - (stageSummary?.totals?.total_verified || 0))}
                 </span>
                 <span className="metric-subtext">Belum ada BA (INVERS - Total Verifikasi)</span>
               </div>
               <div className="metric-card">
                 <span className="metric-title">Terverifikasi Lolos</span>
                 <span className="metric-value">{stageSummary?.totals?.lolos || 0}</span>
-                <span className="metric-subtext">Memenuhi syarat (Lamp IIA)</span>
+                <span className="metric-subtext">
+                  Reguler: <strong>{stageSummary?.totals?.regular?.lolos || 0}</strong> • Verfal: <strong>{stageSummary?.totals?.verfal?.lolos || 0}</strong>
+                </span>
               </div>
               <div className="metric-card">
                 <span className="metric-title">Tidak Lolos</span>
                 <span className="metric-value">{stageSummary?.totals?.tidak_lolos || 0}</span>
-                <span className="metric-subtext">Diberhentikan & diganti (Lamp IIIA)</span>
+                <span className="metric-subtext">
+                  Reguler: <strong>{stageSummary?.totals?.regular?.tidak_lolos || 0}</strong> • Verfal: <strong>{stageSummary?.totals?.verfal?.tidak_lolos || 0}</strong>
+                </span>
               </div>
               <div className="metric-card" style={{ borderLeft: getActiveMismatchCount() > 0 ? '4px solid var(--danger)' : '4px solid var(--success)' }}>
                 <span className="metric-title">Ketidakcocokan / Error</span>
@@ -3954,6 +4222,320 @@ function App() {
           </div>
         )}
 
+        {/* Verifikasi Faktual (Verfal) Dashboard View */}
+        {activeTab === 'verfal' && (
+          <>
+            {/* Visual Metrik Kartu */}
+            {/* Visual Metrik Kartu */}
+            <div className="metrics-grid">
+              <div className="metric-card accent-green">
+                <span className="metric-title">Total Alokasi INVERS</span>
+                <span className="metric-value">{verfalData?.grand_totals?.alokasi || 0}</span>
+                <span className="metric-subtext">Semua Kabupaten di Tahap Aktif</span>
+              </div>
+              <div className="metric-card accent-blue">
+                <span className="metric-title">Total Verifikasi Terproses</span>
+                <span className="metric-value">{verfalData?.grand_totals?.verifikasi || 0}</span>
+                <span className="metric-subtext">
+                  Verfal: <strong>{verfalData?.grand_totals?.verfal?.verifikasi || 0}</strong> • Reguler: <strong>{verfalData?.grand_totals?.regular?.verifikasi || 0}</strong>
+                </span>
+              </div>
+              <div className="metric-card accent-amber">
+                <span className="metric-title">Rekomendasi (Lolos)</span>
+                <span className="metric-value">{verfalData?.grand_totals?.lolos || 0}</span>
+                <span className="metric-subtext">
+                  Verfal: <strong>{verfalData?.grand_totals?.verfal?.lolos || 0}</strong> • Reguler: <strong>{verfalData?.grand_totals?.regular?.lolos || 0}</strong>
+                </span>
+              </div>
+              <div className="metric-card accent-red">
+                <span className="metric-title">Tidak Direkomendasikan</span>
+                <span className="metric-value">{verfalData?.grand_totals?.tidak_lolos || 0}</span>
+                <span className="metric-subtext">
+                  Verfal: <strong>{verfalData?.grand_totals?.verfal?.tidak_lolos || 0}</strong> • Reguler: <strong>{verfalData?.grand_totals?.regular?.tidak_lolos || 0}</strong>
+                </span>
+              </div>
+              <div className="metric-card accent-gray">
+                <span className="metric-title">Sisa Belum Terverifikasi</span>
+                <span className="metric-value">{verfalData?.grand_totals?.belum_verifikasi || 0}</span>
+                <span className="metric-subtext">Belum ada BA (INVERS - Total Verif)</span>
+              </div>
+            </div>
+
+            {/* Section Action Bar */}
+            <div className="card-section" style={{ marginTop: '20px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+                <div>
+                  <h2 style={{ fontSize: '1.2rem', fontWeight: 700, margin: 0, color: 'var(--text-main)' }}>
+                    Dasbor Verifikasi Faktual (Verfal) per Kabupaten
+                  </h2>
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
+                    Daftar Berita Acara Verifikasi Faktual yang dikelompokkan berdasarkan Kabupaten/Kota di {stages.find(s => s.id.toString() === selectedStageId)?.name || 'Tahap Aktif'}.
+                  </p>
+                </div>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <a
+                    href={`${BACKEND_URL}/api/templates/download/verfal`}
+                    download="TEMPLATE_VERFAL.xlsx"
+                    className="btn btn-secondary btn-sm"
+                    style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                    Unduh Template Verfal
+                  </a>
+                  {isAdmin && (
+                    <button
+                      className="btn btn-primary btn-sm"
+                      onClick={() => {
+                        const kabList = verfalData?.kabupaten_groups?.map(g => g.kabupaten) || [];
+                        setVerfalUploadKabupaten(kabList[0] || '');
+                        setVerfalUploadBatchName('BA-1');
+                        setVerfalUploadFile(null);
+                        setShowVerfalUploadModal(true);
+                      }}
+                      style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                      Unggah BA Verfal Baru
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Kabupaten Accordion List */}
+            <div className="verfal-container" style={{ marginTop: '16px' }}>
+              {verfalLoading ? (
+                <div className="empty-state">
+                  <div className="spinner"></div>
+                  <p style={{ marginTop: '12px', color: 'var(--text-muted)' }}>Memuat data Verifikasi Faktual...</p>
+                </div>
+              ) : !verfalData?.kabupaten_groups || verfalData.kabupaten_groups.length === 0 ? (
+                <div className="empty-state">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-muted)', marginBottom: '12px' }}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                  <p style={{ fontWeight: 600, color: 'var(--text-main)', margin: 0 }}>Belum ada data Kabupaten di Tahap ini</p>
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>Pastikan data INVERS pada tahap ini sudah diunggah.</p>
+                </div>
+              ) : (
+                verfalData.kabupaten_groups.map((group) => {
+                  const isExpanded = expandedVerfalKabupatens.has(group.kabupaten);
+                  const hasBatches = group.batches && group.batches.length > 0;
+                  return (
+                    <div key={group.kabupaten} className="verfal-kabupaten-card">
+                      <div 
+                        className={`verfal-kabupaten-header ${isExpanded ? 'expanded' : ''}`}
+                        onClick={() => toggleVerfalAccordion(group.kabupaten)}
+                      >
+                        <div className="verfal-kab-title">
+                          <span style={{ 
+                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                            width: '24px', height: '24px', borderRadius: '50%', background: isExpanded ? 'var(--primary)' : 'rgba(0,0,0,0.06)',
+                            color: isExpanded ? '#ffffff' : 'var(--text-main)', transition: 'all 0.2s ease',
+                            transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)'
+                          }}>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                          </span>
+                          <span className="verfal-kab-name">{group.kabupaten}</span>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                          <div className="verfal-badges-group">
+                            <span className="verfal-pill alokasi" title="Alokasi Data INVERS">
+                              Alokasi: {group.total_alokasi_invers}
+                            </span>
+                            <span className="verfal-pill verif" title="Total Verifikasi (Verfal + Reguler)">
+                              Verif: {group.totals.verifikasi} (Verfal: {group.totals.verfal?.verifikasi || 0} | Reg: {group.totals.regular?.verifikasi || 0})
+                            </span>
+                            <span className="verfal-pill lolos" title="Rekomendasi (Lolos)">
+                              Lolos: {group.totals.lolos}
+                            </span>
+                            <span className="verfal-pill tidak" title="Tidak Lolos">
+                              Tidak Lolos: {group.totals.tidak_lolos}
+                            </span>
+                            {group.totals.pengganti > 0 && (
+                              <span className="verfal-pill pengganti" title="Calon Pengganti">
+                                Pengganti: {group.totals.pengganti}
+                              </span>
+                            )}
+                            <span className="verfal-pill belum" title="Sisa Belum Terverifikasi">
+                              Sisa: {group.totals.belum_verifikasi}
+                            </span>
+                          </div>
+
+                          {isAdmin && (
+                            <button
+                              className="btn btn-secondary btn-sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setVerfalUploadKabupaten(group.kabupaten);
+                                const nextNum = (group.batches?.length || 0) + 1;
+                                setVerfalUploadBatchName(`BA-${nextNum}`);
+                                setVerfalUploadFile(null);
+                                setShowVerfalUploadModal(true);
+                              }}
+                              style={{ fontSize: '0.78rem', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                              title={`Unggah BA Verfal baru khusus ${group.kabupaten}`}
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                              + BA
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {isExpanded && (
+                        <div style={{ padding: '0' }}>
+                          {!hasBatches ? (
+                            <div style={{ padding: '24px 20px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                              <p style={{ margin: 0, fontSize: '0.9rem' }}>Belum ada Berita Acara Verfal yang diunggah untuk {group.kabupaten}.</p>
+                              {isAdmin && (
+                                <button
+                                  className="btn btn-primary btn-sm"
+                                  onClick={() => {
+                                    setVerfalUploadKabupaten(group.kabupaten);
+                                    setVerfalUploadBatchName('BA-1');
+                                    setVerfalUploadFile(null);
+                                    setShowVerfalUploadModal(true);
+                                  }}
+                                  style={{ marginTop: '12px' }}
+                                >
+                                  + Unggah BA-1 untuk {group.kabupaten}
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="table-responsive" style={{ borderTop: '1px solid var(--border)' }}>
+                              <table className="data-table">
+                                <thead>
+                                  <tr>
+                                    <th style={{ width: '40px', textAlign: 'center' }}>No</th>
+                                    <th>Nama Berita Acara</th>
+                                    <th>Nomor BA</th>
+                                    <th>Tanggal Terbit</th>
+                                    <th>Lolos</th>
+                                    <th>Tidak Lolos</th>
+                                    <th>Pengganti</th>
+                                    <th>Total Verfal</th>
+                                    <th style={{ textAlign: 'center' }}>Terbit</th>
+                                    <th>Aksi</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {group.batches.map((b, bIdx) => (
+                                    <tr
+                                      key={b.id}
+                                      draggable={isAdmin}
+                                      onDragStart={(e) => handleVerfalBatchDragStart(e, b, group.kabupaten)}
+                                      onDragOver={(e) => e.preventDefault()}
+                                      onDrop={(e) => handleVerfalBatchDrop(e, b, group.kabupaten)}
+                                      style={{ cursor: isAdmin ? 'grab' : 'default' }}
+                                    >
+                                      <td style={{ textAlign: 'center', fontWeight: 600 }}>
+                                        {isAdmin && (
+                                          <span style={{ cursor: 'grab', marginRight: '6px', color: 'var(--text-muted)' }} title="Tarik untuk mengubah urutan">
+                                            ⋮⋮
+                                          </span>
+                                        )}
+                                        {bIdx + 1}
+                                      </td>
+                                      <td style={{ fontWeight: 600, color: 'var(--primary)' }}>
+                                        {b.name}
+                                      </td>
+                                      <td>{b.nomor_ba || '—'}</td>
+                                      <td>{b.tanggal_ba || new Date(b.uploaded_at).toLocaleDateString('id-ID')}</td>
+                                      <td style={{ color: 'var(--success)', fontWeight: 600 }}>{b.lolos_count} CPB</td>
+                                      <td style={{ color: '#991b1b', fontWeight: 500 }}>{b.tidak_lolos_count} CPB</td>
+                                      <td style={{ color: '#92400e', fontWeight: 500 }}>{b.replacement_count} CPB</td>
+                                      <td style={{ fontWeight: 700 }}>{b.verifikasi_count} CPB</td>
+                                      <td style={{ textAlign: 'center' }}>
+                                        {isAdmin ? (
+                                          <label className="publish-checkbox" title={b.is_published ? "Sudah terbit — klik untuk batalkan" : "Belum terbit — klik untuk tandai terbit"}>
+                                            <input
+                                              type="checkbox"
+                                              checked={!!b.is_published}
+                                              onChange={async () => {
+                                                await handleTogglePublished(b.id);
+                                                fetchVerfalBatches(selectedStageId);
+                                              }}
+                                            />
+                                            <span className="publish-checkmark"></span>
+                                            <span className="publish-label">{b.is_published ? 'Ya' : 'Tidak'}</span>
+                                          </label>
+                                        ) : (
+                                          <span style={{ 
+                                            padding: '2px 8px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: '700',
+                                            backgroundColor: b.is_published ? 'var(--success-light)' : 'rgba(0,0,0,0.05)',
+                                            color: b.is_published ? 'var(--success)' : 'var(--text-muted)',
+                                            border: `1px solid ${b.is_published ? 'var(--success)' : 'var(--border)'}`
+                                          }}>
+                                            {b.is_published ? 'Ya' : 'Tidak'}
+                                          </span>
+                                        )}
+                                      </td>
+                                      <td>
+                                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                                          <button 
+                                            className="btn btn-secondary btn-sm" 
+                                            onClick={() => handleOpenVerfalWordModal(b, group)}
+                                            title="Cetak Berita Acara Verfal ke format .docx / .pdf"
+                                          >
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "4px", verticalAlign: "middle" }}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+                                            Cetak BA
+                                          </button>
+                                          <button 
+                                            className="btn btn-secondary btn-sm" 
+                                            onClick={() => window.open(`${BACKEND_URL}/api/export/verfal/excel/${b.id}`, '_blank')}
+                                            title="Ekspor Excel Format Lamp.IIA & Lamp.IIIA"
+                                          >
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "4px", verticalAlign: "middle" }}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                                            Ekspor Excel
+                                          </button>
+                                          <button 
+                                            className="btn btn-secondary btn-sm" 
+                                            onClick={() => openPreview(b.id)}
+                                            title="Preview Isi Data"
+                                          >
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "4px", verticalAlign: "middle" }}><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                                            Preview
+                                          </button>
+                                          {isAdmin && (
+                                            <>
+                                              <button 
+                                                className="btn btn-secondary btn-sm" 
+                                                onClick={() => openRenameBatchModal(b.id, b.name)}
+                                                title="Ubah Nama Berita Acara / Batch"
+                                              >
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+                                              </button>
+                                              <button 
+                                                className="btn btn-danger btn-sm"
+                                                onClick={async () => {
+                                                  await handleDeleteBatch(b.id);
+                                                  fetchVerfalBatches(selectedStageId);
+                                                }}
+                                                title="Hapus Batch Verfal Ini"
+                                              >
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                                              </button>
+                                            </>
+                                          )}
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </>
+        )}
+
         {/* Overview Center (Pusat Rekap Data) View */}
         {activeTab === 'overview' && (
           <div className="card-section">
@@ -4194,6 +4776,42 @@ function App() {
               <span><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "6px", verticalAlign: "middle" }}><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>Pusat Rekonsiliasi & Perbaikan Mismatch</span>
               <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
                 Periksa perbedaan entri NIK, KK, atau Nama antara berkas hasil verifikasi dengan data INVERS.
+              </span>
+            </div>
+
+            {/* Toggle Mode Rekonsiliasi */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+              <div className="reconciliation-type-toggle">
+                <button 
+                  className={reconciliationBatchType === 'ALL' ? 'active' : ''}
+                  onClick={() => {
+                    setReconciliationBatchType('ALL');
+                    fetchStageRecords(selectedStageId, 'ALL');
+                  }}
+                >
+                  Semua (Gabungan)
+                </button>
+                <button 
+                  className={reconciliationBatchType === 'REGULAR' ? 'active' : ''}
+                  onClick={() => {
+                    setReconciliationBatchType('REGULAR');
+                    fetchStageRecords(selectedStageId, 'REGULAR');
+                  }}
+                >
+                  Verifikasi Reguler
+                </button>
+                <button 
+                  className={reconciliationBatchType === 'VERFAL' ? 'active' : ''}
+                  onClick={() => {
+                    setReconciliationBatchType('VERFAL');
+                    fetchStageRecords(selectedStageId, 'VERFAL');
+                  }}
+                >
+                  Verifikasi Faktual (Verfal)
+                </button>
+              </div>
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                Sedang menampilkan rekonsiliasi data untuk mode: <strong>{reconciliationBatchType === 'ALL' ? 'Semua Data Verifikasi (Gabungan)' : (reconciliationBatchType === 'VERFAL' ? 'Verifikasi Faktual (Verfal)' : 'Verifikasi Reguler')}</strong>
               </span>
             </div>
 
@@ -6382,6 +7000,437 @@ function App() {
             })()}
           </div>
         )}
+
+        {/* Rekap BA Verfal View */}
+        {activeTab === 'rekap-batch-verfal' && (
+          <div className="rekap-batch-container">
+            <div className="rekap-batch-header-bar">
+              <div>
+                <h2 className="rekap-batch-title">Rekapitulasi Berita Acara Verifikasi Faktual (Verfal)</h2>
+                <p className="rekap-batch-subtitle">
+                  Matriks perbandingan Berita Acara Verfal per Kabupaten terhadap seluruh tahap di {provinces.find(p => p.id === selectedProvinceId)?.name || 'Provinsi Aktif'}
+                </p>
+              </div>
+              <div className="rekap-batch-actions">
+                <label className="rekap-batch-toggle-label">
+                  <input 
+                    type="checkbox"
+                    checked={rekapBatchVerfalPublishedOnly === 1}
+                    onChange={(e) => {
+                      const val = e.target.checked ? 1 : 0;
+                      setRekapBatchVerfalPublishedOnly(val);
+                      fetchRekapBatchVerfal(val);
+                    }}
+                  />
+                  <span>Hanya BA Terbit</span>
+                </label>
+                <button 
+                  className="btn btn-primary btn-sm rekap-batch-btn-export"
+                  onClick={() => window.open(`${BACKEND_URL}/api/rekap-batch-verfal/export?published_only=${rekapBatchVerfalPublishedOnly}&province_id=${selectedProvinceId}`, '_blank')}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                  Ekspor Rekap Verfal Excel
+                </button>
+              </div>
+            </div>
+
+            {rekapBatchVerfalLoading ? (
+              <div className="empty-state">
+                <div className="spinner"></div>
+                <p style={{ marginTop: '12px', color: 'var(--text-muted)' }}>Memuat rekap batch verfal...</p>
+              </div>
+            ) : !rekapBatchVerfalData || !rekapBatchVerfalData.stages || rekapBatchVerfalData.stages.length === 0 ? (
+              <div className="empty-state">
+                <p style={{ fontWeight: 600, color: 'var(--text-main)' }}>Belum ada data Berita Acara Verfal yang diunggah</p>
+              </div>
+            ) : (() => {
+              const allStages = rekapBatchVerfalData.stages;
+              const hasBatches = allStages.some(s => s.batches && s.batches.length > 0);
+              if (!hasBatches) {
+                return (
+                  <div className="empty-state">
+                    <p style={{ fontWeight: 600, color: 'var(--text-main)' }}>Belum ada Berita Acara Verfal pada tahap yang dipilih</p>
+                  </div>
+                );
+              }
+              return (
+                <div className="rekap-scroll-container" style={{ border: '1px solid var(--border)', borderRadius: '8px', overflow: 'auto' }}>
+                  <table className="rekap-table-unified">
+                    <thead>
+                      <tr>
+                        <th className="rekap-batch-corner" rowSpan="3" style={{ left: 0, width: '45px', minWidth: '45px', maxWidth: '45px' }}>No</th>
+                        <th className="rekap-batch-corner rekap-batch-border-stage" rowSpan="3" style={{ left: '45px', width: '220px', minWidth: '220px', maxWidth: '220px', textAlign: 'left' }}>Kabupaten / Kota</th>
+                        {allStages.map(stage => {
+                          const batchCount = stage.batches.length;
+                          if (batchCount === 0) return null;
+                          return (
+                            <th 
+                              key={stage.stage_id} 
+                              colSpan={batchCount * 5} 
+                              className="rekap-batch-th-level1 rekap-batch-border-stage"
+                            >
+                              {stage.stage_name.toUpperCase()}
+                            </th>
+                          );
+                        })}
+                      </tr>
+                      <tr>
+                        {allStages.map(stage => 
+                          stage.batches.map((batch, bIdx) => {
+                            const isLastBatchInStage = bIdx === stage.batches.length - 1;
+                            const borderClass = isLastBatchInStage ? 'rekap-batch-border-stage' : 'rekap-batch-border-ba';
+                            return (
+                              <th 
+                                key={batch.batch_id} 
+                                colSpan="5" 
+                                className={`rekap-batch-th-level2 ${borderClass}`}
+                              >
+                                <div style={{ fontWeight: 700, fontSize: '0.8rem' }}>
+                                  {batch.batch_name.toUpperCase()} {batch.kabupaten ? `(${batch.kabupaten})` : ''}
+                                </div>
+                                <div style={{ fontWeight: 500, fontSize: '0.66rem', marginTop: '2px', opacity: 0.85 }}>
+                                  No: {batch.nomor_ba || '—'}
+                                </div>
+                                <div style={{ fontWeight: 500, fontSize: '0.66rem', opacity: 0.85 }}>
+                                  Tgl: {batch.tanggal_ba || '—'}
+                                </div>
+                              </th>
+                            );
+                          })
+                        )}
+                      </tr>
+                      <tr>
+                        {allStages.map(stage => 
+                          stage.batches.map((batch, bIdx) => {
+                            const isLastBatchInStage = bIdx === stage.batches.length - 1;
+                            const borderClass = isLastBatchInStage ? 'rekap-batch-border-stage' : 'rekap-batch-border-ba';
+                            return (
+                              <React.Fragment key={batch.batch_id}>
+                                <th className="rekap-batch-th-level3 rekap-batch-sub-verif">VERIFIKASI</th>
+                                <th className="rekap-batch-th-level3 rekap-batch-sub-lolos">LOLOS</th>
+                                <th className="rekap-batch-th-level3 rekap-batch-sub-tidak">TIDAK LOLOS</th>
+                                <th className="rekap-batch-th-level3 rekap-batch-sub-sk-sudah">SUDAH SK</th>
+                                <th className={`rekap-batch-th-level3 rekap-batch-sub-sk-belum ${borderClass}`}>BELUM SK</th>
+                              </React.Fragment>
+                            );
+                          })
+                        )}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rekapBatchVerfalData.all_kabupaten.map((kab, kabIdx) => {
+                        return (
+                          <tr key={kabIdx}>
+                            <td className="rekap-frozen-no" style={{ width: '45px', minWidth: '45px', maxWidth: '45px', left: 0 }}>{kabIdx + 1}</td>
+                            <td className="rekap-frozen-kab rekap-batch-border-stage" style={{ width: '220px', minWidth: '220px', maxWidth: '220px', left: '45px' }}>{kab}</td>
+                            {allStages.map(stage => 
+                              stage.batches.map((batch, bIdx) => {
+                                const isLastBatchInStage = bIdx === stage.batches.length - 1;
+                                const borderClass = isLastBatchInStage ? 'rekap-batch-border-stage' : 'rekap-batch-border-ba';
+                                const kd = batch.kabupaten_data[kabIdx];
+                                const v = kd?.verifikasi || 0;
+                                const l = kd?.lolos || 0;
+                                const tl = kd?.tidak_lolos || 0;
+                                const sks = kd?.sk_sudah || 0;
+                                const skb = kd?.sk_belum || 0;
+                                return (
+                                  <React.Fragment key={batch.batch_id}>
+                                    <td className="rekap-cell rekap-batch-cell-verif">{v > 0 ? v : '-'}</td>
+                                    <td className="rekap-cell rekap-batch-cell-lolos">{l > 0 ? l : '-'}</td>
+                                    <td className="rekap-cell rekap-batch-cell-tidak">{tl > 0 ? tl : '-'}</td>
+                                    <td className="rekap-cell rekap-batch-cell-sk-sudah">{sks > 0 ? sks : '-'}</td>
+                                    <td className={`rekap-cell rekap-batch-cell-sk-belum ${borderClass}`}>{skb > 0 ? skb : '-'}</td>
+                                  </React.Fragment>
+                                );
+                              })
+                            )}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot>
+                      <tr className="rekap-footer-row">
+                        <td className="rekap-footer-frozen" style={{ left: 0, width: '45px', minWidth: '45px', maxWidth: '45px' }}></td>
+                        <td className="rekap-footer-frozen rekap-batch-border-stage" style={{ left: '45px', width: '220px', minWidth: '220px', maxWidth: '220px', fontWeight: 700, textAlign: 'left' }}>TOTAL</td>
+                        {allStages.map(stage => 
+                          stage.batches.map((batch, bIdx) => {
+                            const isLastBatchInStage = bIdx === stage.batches.length - 1;
+                            const borderClass = isLastBatchInStage ? 'rekap-batch-border-stage' : 'rekap-batch-border-ba';
+                            const t = batch.totals;
+                            return (
+                              <React.Fragment key={batch.batch_id}>
+                                <td className="rekap-footer-cell rekap-batch-cell-verif">{t.verifikasi || 0}</td>
+                                <td className="rekap-footer-cell rekap-batch-cell-lolos">{t.lolos || 0}</td>
+                                <td className="rekap-footer-cell rekap-batch-cell-tidak">{t.tidak_lolos || 0}</td>
+                                <td className="rekap-footer-cell rekap-batch-cell-sk-sudah">{t.sk_sudah || 0}</td>
+                                <td className={`rekap-footer-cell rekap-batch-cell-sk-belum ${borderClass}`}>{t.sk_belum || 0}</td>
+                              </React.Fragment>
+                            );
+                          })
+                        )}
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
+      {/* Modal Upload Verfal */}
+      {showVerfalUploadModal && (
+        <div className="modal-overlay">
+          <form className="modal-content" onSubmit={handleVerfalUpload} style={{ maxWidth: '520px' }}>
+            <div className="modal-header">
+              <h3>
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "8px", verticalAlign: "middle" }}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                Unggah Verifikasi Faktual (Verfal)
+              </h3>
+              <button 
+                type="button" 
+                className="modal-close"
+                onClick={() => setShowVerfalUploadModal(false)}
+              >
+                &times;
+              </button>
+            </div>
+
+            <div className="modal-body">
+              <div className="form-group" style={{ marginBottom: '14px' }}>
+                <label className="form-label">Kabupaten / Kota <span style={{ color: 'red' }}>*</span></label>
+                <select
+                  className="form-input"
+                  value={verfalUploadKabupaten}
+                  onChange={e => setVerfalUploadKabupaten(e.target.value)}
+                  required
+                >
+                  <option value="">-- Pilih Kabupaten --</option>
+                  {verfalData?.kabupaten_groups?.map(g => (
+                    <option key={g.kabupaten} value={g.kabupaten}>
+                      {g.kabupaten} (Alokasi: {g.total_alokasi_invers} unit)
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '14px' }}>
+                <label className="form-label">Nama Berita Acara / Batch <span style={{ color: 'red' }}>*</span></label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="Contoh: BA-1, BA-2"
+                  value={verfalUploadBatchName}
+                  onChange={e => setVerfalUploadBatchName(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '14px' }}>
+                <label className="form-label">File Excel Verfal (.xlsx) <span style={{ color: 'red' }}>*</span></label>
+                <input
+                  type="file"
+                  accept=".xlsx"
+                  className="form-input"
+                  onChange={e => setVerfalUploadFile(e.target.files[0])}
+                  required
+                />
+                <small style={{ display: 'block', marginTop: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+                  Harus menggunakan template Verfal dengan Sheet <code>Lamp.IIA</code> dan <code>Lamp.IIIA</code>.
+                </small>
+              </div>
+            </div>
+
+            <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button 
+                type="button" 
+                className="btn btn-secondary"
+                onClick={() => setShowVerfalUploadModal(false)}
+              >
+                Batal
+              </button>
+              <button 
+                type="submit" 
+                className="btn btn-primary"
+                disabled={verfalUploadLoading}
+              >
+                {verfalUploadLoading ? 'Mengunggah & Memvalidasi...' : 'Unggah & Simpan'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Modal Cetak BA Verfal */}
+      {showVerfalWordModal && selectedVerfalBatchForWord && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ maxWidth: '680px' }}>
+            <div className="modal-header">
+              <h3>
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "8px", verticalAlign: "middle" }}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+                Cetak Berita Acara Verifikasi Faktual (Verfal)
+              </h3>
+              <button 
+                type="button" 
+                className="modal-close"
+                onClick={() => {
+                  setShowVerfalWordModal(false);
+                  setSelectedVerfalBatchForWord(null);
+                }}
+              >
+                &times;
+              </button>
+            </div>
+
+            <div className="modal-body">
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '16px', padding: '8px 12px', background: '#f8f9fa', borderRadius: '6px', border: '1px solid var(--border)' }}>
+                Isian form ini akan mengganti placeholder pada template <strong>FORMAT BA VERFAL</strong> serta menyusun tabel <strong>Lampiran I, II, dan III</strong>.
+              </p>
+
+              <div className="modal-form-grid">
+                <div className="form-group">
+                  <label className="form-label">Nomor BA Verfal <span style={{ color: 'red' }}>*</span></label>
+                  <input 
+                    type="text" 
+                    className="form-input"
+                    placeholder="Contoh: 01/BA-VERFAL/BSPS/2026"
+                    value={verfalWordFormData.nomor_ba_verfal}
+                    onChange={e => setVerfalWordFormData({...verfalWordFormData, nomor_ba_verfal: e.target.value})}
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Tahun Anggaran</label>
+                  <input 
+                    type="text" 
+                    className="form-input"
+                    value={verfalWordFormData.tahun_anggaran}
+                    onChange={e => setVerfalWordFormData({...verfalWordFormData, tahun_anggaran: e.target.value})}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Nomor BA Versul (Rujukan Usulan)</label>
+                  <input 
+                    type="text" 
+                    className="form-input"
+                    placeholder="Contoh: 05/BA-USULAN/2026"
+                    value={verfalWordFormData.nomor_ba_versul}
+                    onChange={e => setVerfalWordFormData({...verfalWordFormData, nomor_ba_versul: e.target.value})}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Tanggal BA Verfal</label>
+                  <input 
+                    type="date" 
+                    className="form-input"
+                    value={verfalWordFormData.tanggal_ba_verfal}
+                    onChange={e => setVerfalWordFormData({...verfalWordFormData, tanggal_ba_verfal: e.target.value})}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Total Alokasi Invers ({selectedVerfalBatchForWord.kabupaten})</label>
+                  <input 
+                    type="text" 
+                    className="form-input"
+                    value={verfalWordFormData.total_alokasi_invers}
+                    onChange={e => setVerfalWordFormData({...verfalWordFormData, total_alokasi_invers: e.target.value})}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Total Alokasi Versul</label>
+                  <input 
+                    type="text" 
+                    className="form-input"
+                    value={verfalWordFormData.total_alokasi_versul}
+                    onChange={e => setVerfalWordFormData({...verfalWordFormData, total_alokasi_versul: e.target.value})}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Nama Pejabat Kepala Balai</label>
+                  <input 
+                    type="text" 
+                    className="form-input"
+                    placeholder="Nama Lengkap & Gelar / NIP"
+                    value={verfalWordFormData.nama_pejabat_kepala_balai}
+                    onChange={e => setVerfalWordFormData({...verfalWordFormData, nama_pejabat_kepala_balai: e.target.value})}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Nama Pejabat Ketua Tim Verfal</label>
+                  <input 
+                    type="text" 
+                    className="form-input"
+                    placeholder="Nama Lengkap & Gelar / NIP"
+                    value={verfalWordFormData.nama_pejabat_ketua_tim}
+                    onChange={e => setVerfalWordFormData({...verfalWordFormData, nama_pejabat_ketua_tim: e.target.value})}
+                  />
+                </div>
+
+                <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                  <label className="form-label">Tanggal Terbit & Lokasi BA Verfal</label>
+                  <input 
+                    type="text" 
+                    className="form-input"
+                    placeholder="Contoh: Makassar, 22 Agustus 2026"
+                    value={verfalWordFormData.tanggal_terbit_ba_verfal}
+                    onChange={e => setVerfalWordFormData({...verfalWordFormData, tanggal_terbit_ba_verfal: e.target.value})}
+                  />
+                </div>
+
+                <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                  <label className="form-label">Alasan Tidak Lolos Terbanyak (Opsional)</label>
+                  <input 
+                    type="text" 
+                    className="form-input"
+                    placeholder="Kosongkan untuk otomatis dihitung dari database"
+                    value={verfalWordFormData.alasan_tidak_lolos_terbanyak}
+                    onChange={e => setVerfalWordFormData({...verfalWordFormData, alasan_tidak_lolos_terbanyak: e.target.value})}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button 
+                type="button" 
+                className="btn btn-secondary"
+                onClick={() => {
+                  setShowVerfalWordModal(false);
+                  setSelectedVerfalBatchForWord(null);
+                }}
+              >
+                Batal
+              </button>
+              <button 
+                type="button" 
+                className="btn btn-primary"
+                disabled={verfalWordExportLoading}
+                onClick={() => handleVerfalWordExport('docx')}
+                style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+                {verfalWordExportLoading ? 'Memproses...' : 'Unduh Word (.docx)'}
+              </button>
+              <button 
+                type="button" 
+                className="btn btn-secondary"
+                disabled={verfalWordExportLoading}
+                onClick={() => handleVerfalWordExport('pdf')}
+                style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                {verfalWordExportLoading ? 'Memproses...' : 'Unduh PDF (.pdf)'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal Input Alasan Tidak Lolos */}
       {disqualifyModalRecord && (

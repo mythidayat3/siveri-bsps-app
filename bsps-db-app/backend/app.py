@@ -50,6 +50,14 @@ def find_header_and_data(sheet):
         return headers, data_rows, header_row_idx
     return None, None, None
 
+def clean_nik(val):
+    if val is None:
+        return ""
+    s = str(val).strip()
+    if s.endswith('.0'):
+        s = s[:-2]
+    return ''.join(c for c in s if c.isdigit())
+
 @app.get("/")
 @app.head("/")
 def root_health_check():
@@ -590,6 +598,256 @@ async def upload_verified(
         "stats": stats
     }
 
+@app.post("/api/verfal/upload")
+async def upload_verfal(
+    stage_id: int = Form(...),
+    kabupaten: str = Form(...),
+    batch_name: str = Form(...),
+    file: UploadFile = File(...)
+):
+    if not kabupaten.strip():
+        raise HTTPException(status_code=400, detail="Kabupaten wajib dipilih untuk Verifikasi Faktual")
+    if not batch_name.strip():
+        raise HTTPException(status_code=400, detail="Nama Berita Acara / Batch tidak boleh kosong")
+        
+    file_bytes = await file.read()
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Gagal membaca file Excel: {str(e)}")
+        
+    sheet_names = wb.sheetnames
+    if len(sheet_names) < 2:
+        raise HTTPException(status_code=400, detail="Excel Verfal harus memiliki minimal 2 sheet (Sheet 1: Lamp.IIA, Sheet 2: Lamp.IIIA)")
+        
+    ws_lolos = wb.worksheets[0]
+    headers_lolos, data_lolos, _ = find_header_and_data(ws_lolos)
+    if headers_lolos is None:
+        raise HTTPException(status_code=400, detail="Tidak dapat menemukan baris header di sheet 1 (Lamp.IIA)")
+        
+    ws_tidak = wb.worksheets[1]
+    headers_tidak, data_tidak, _ = find_header_and_data(ws_tidak)
+    if headers_tidak is None:
+        raise HTTPException(status_code=400, detail="Tidak dapat menemukan baris header di sheet 2 (Lamp.IIIA)")
+        
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT id FROM invers_stages WHERE id = ?", (stage_id,))
+    if not cursor.fetchone():
+        conn.close()
+        raise HTTPException(status_code=400, detail="Tahap INVERS yang dipilih tidak terdaftar")
+        
+    cursor.execute("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM verified_batches WHERE stage_id = ? AND batch_type = 'VERFAL'", (stage_id,))
+    next_sort_order = cursor.fetchone()[0]
+    kab_clean = kabupaten.strip().upper()
+    cursor.execute("""
+        INSERT INTO verified_batches (stage_id, name, sort_order, batch_type, kabupaten) 
+        VALUES (?, ?, ?, 'VERFAL', ?)
+    """, (stage_id, batch_name.strip(), next_sort_order, kab_clean))
+    batch_id = cursor.lastrowid
+    
+    h_lolos_map = {}
+    for idx, h in enumerate(headers_lolos):
+        h_upper = h.upper().replace(' ', '')
+        if 'NAMA' in h_upper: h_lolos_map['nama'] = idx
+        elif 'KTP' in h_upper or 'NIK' in h_upper: h_lolos_map['no_ktp'] = idx
+        elif 'KK' in h_upper or 'KELUARGA' in h_upper: h_lolos_map['no_kk'] = idx
+        elif 'URUT' in h_upper or h_upper == 'NO.': h_lolos_map['no_urut'] = idx
+        elif 'DESA' in h_upper and 'KODE' in h_upper: h_lolos_map['kode_desa'] = idx
+        elif 'DESA' in h_upper or 'KELURAHAN' in h_upper: h_lolos_map['desa_kelurahan'] = idx
+        elif 'KECAMATAN' in h_upper: h_lolos_map['kecamatan'] = idx
+        elif 'KABUPATEN' in h_upper or 'KOTA' in h_upper: h_lolos_map['kabupaten_kota'] = idx
+        elif 'ALAMAT' in h_upper: h_lolos_map['alamat'] = idx
+        elif 'LOLOS' in h_upper or 'STATUS' in h_upper or 'PENGGANTI' in h_upper: h_lolos_map['status'] = idx
+        elif 'LATITUDE' in h_upper: h_lolos_map['latitude'] = idx
+        elif 'LONGITUDE' in h_upper: h_lolos_map['longitude'] = idx
+        elif 'TAHAP' in h_upper: h_lolos_map['tahap'] = idx
+        elif 'TANGGAL' in h_upper: h_lolos_map['tanggal'] = idx
+        elif 'KETERANGAN' in h_upper: h_lolos_map['keterangan'] = idx
+        elif 'KELAMIN' in h_upper or 'JENIS' in h_upper: h_lolos_map['jenis_kelamin'] = idx
+        
+    h_tidak_map = {}
+    for idx, h in enumerate(headers_tidak):
+        h_upper = str(h or '').upper().replace('\n', ' ').strip()
+        h_clean = h_upper.replace(' ', '')
+        
+        # Kolom Pengganti (jika ada kata PENGGANTI atau kolom >= 9)
+        if 'PENGGANTI' in h_upper:
+            if 'NAMA' in h_upper: h_tidak_map['nama_pengganti'] = idx
+            elif 'KTP' in h_upper or 'NIK' in h_upper: h_tidak_map['no_ktp_pengganti'] = idx
+            elif 'KK' in h_upper: h_tidak_map['no_kk_pengganti'] = idx
+            elif 'KELAMIN' in h_upper or 'JENIS' in h_upper: h_tidak_map['jenis_kelamin_pengganti'] = idx
+            elif 'ALAMAT' in h_upper: h_tidak_map['alamat_pengganti'] = idx
+            elif 'DESA' in h_upper or 'KELURAHAN' in h_upper: h_tidak_map['desa_kelurahan_pengganti'] = idx
+            elif 'KECAMATAN' in h_upper: h_tidak_map['kecamatan_pengganti'] = idx
+            elif 'KABUPATEN' in h_upper or 'KOTA' in h_upper: h_tidak_map['kabupaten_pengganti'] = idx
+        elif idx >= 9:
+            if 'BNBA' in h_upper: h_tidak_map['bnba'] = idx
+            elif 'NAMA' in h_upper and 'nama_pengganti' not in h_tidak_map: h_tidak_map['nama_pengganti'] = idx
+            elif ('KELAMIN' in h_upper or 'JENIS' in h_upper) and 'jenis_kelamin_pengganti' not in h_tidak_map: h_tidak_map['jenis_kelamin_pengganti'] = idx
+            elif ('KTP' in h_upper or 'NIK' in h_upper) and 'no_ktp_pengganti' not in h_tidak_map: h_tidak_map['no_ktp_pengganti'] = idx
+            elif 'KK' in h_upper and 'no_kk_pengganti' not in h_tidak_map: h_tidak_map['no_kk_pengganti'] = idx
+            elif 'ALAMAT' in h_upper and 'alamat_pengganti' not in h_tidak_map: h_tidak_map['alamat_pengganti'] = idx
+            elif ('DESA' in h_upper or 'KELURAHAN' in h_upper) and 'desa_kelurahan_pengganti' not in h_tidak_map: h_tidak_map['desa_kelurahan_pengganti'] = idx
+            elif 'KECAMATAN' in h_upper and 'kecamatan_pengganti' not in h_tidak_map: h_tidak_map['kecamatan_pengganti'] = idx
+            elif ('KABUPATEN' in h_upper or 'KOTA' in h_upper) and 'kabupaten_pengganti' not in h_tidak_map: h_tidak_map['kabupaten_pengganti'] = idx
+            elif 'TAHAP' in h_upper: h_tidak_map['tahap'] = idx
+            elif 'TANGGAL' in h_upper: h_tidak_map['tanggal'] = idx
+            elif 'KETERANGAN' in h_upper: h_tidak_map['keterangan'] = idx
+        else:
+            if h_clean == 'NO.': h_tidak_map['no_urut'] = idx
+            elif 'NAMA' in h_upper: h_tidak_map['nama'] = idx
+            elif 'KELAMIN' in h_upper or 'JENIS' in h_upper: h_tidak_map['jenis_kelamin'] = idx
+            elif 'KTP' in h_upper or 'NIK' in h_upper: h_tidak_map['no_ktp'] = idx
+            elif 'KK' in h_upper: h_tidak_map['no_kk'] = idx
+            elif 'ALAMAT' in h_upper: h_tidak_map['alamat'] = idx
+            elif 'DESA' in h_upper or 'KELURAHAN' in h_upper: h_tidak_map['desa_kelurahan'] = idx
+            elif 'KECAMATAN' in h_upper: h_tidak_map['kecamatan'] = idx
+            elif 'KABUPATEN' in h_upper or 'KOTA' in h_upper: h_tidak_map['kabupaten_kota'] = idx
+            elif 'ALASAN' in h_upper: h_tidak_map['alasan_tidak_lolos'] = idx
+            
+    cursor.execute("""
+        SELECT no_ktp, no_kk, status FROM verified_records vr
+        JOIN verified_batches vb ON vr.batch_id = vb.id
+        WHERE vb.stage_id = ? AND vb.batch_type = 'VERFAL'
+    """, (stage_id,))
+    previously_verified_map = {}
+    for row in cursor.fetchall():
+        nik = row['no_ktp'].strip()
+        kk = (row['no_kk'] or '').strip()
+        status = row['status']
+        if nik not in previously_verified_map:
+            previously_verified_map[nik] = set()
+        previously_verified_map[nik].add(status)
+        if kk and kk not in previously_verified_map:
+            previously_verified_map[kk] = set()
+        if kk:
+            previously_verified_map[kk].add(status)
+    
+    def is_duplicate(nik, kk, status):
+        nik_match = nik in previously_verified_map and status in previously_verified_map[nik]
+        kk_match = kk and kk in previously_verified_map and status in previously_verified_map[kk]
+        return 1 if (nik_match or kk_match) else 0
+
+    stats = {"lolos": 0, "tidak_lolos": 0, "replacements": 0, "duplicates": 0}
+    
+    for row in data_lolos:
+        nama = str(row[h_lolos_map.get('nama')]).strip().upper() if 'nama' in h_lolos_map and h_lolos_map['nama'] < len(row) and row[h_lolos_map['nama']] is not None else None
+        if not nama or nama == 'NONE' or nama == '':
+            continue
+            
+        no_ktp_raw = str(row[h_lolos_map.get('no_ktp')]).strip() if 'no_ktp' in h_lolos_map and h_lolos_map['no_ktp'] < len(row) and row[h_lolos_map['no_ktp']] is not None else ""
+        no_ktp = clean_nik(no_ktp_raw)
+        
+        no_kk_raw = str(row[h_lolos_map.get('no_kk')]).strip() if 'no_kk' in h_lolos_map and h_lolos_map['no_kk'] < len(row) and row[h_lolos_map['no_kk']] is not None else ""
+        no_kk = clean_nik(no_kk_raw)
+        
+        raw_status = str(row[h_lolos_map.get('status')]).strip().upper() if 'status' in h_lolos_map and h_lolos_map['status'] < len(row) and row[h_lolos_map['status']] is not None else "LOLOS"
+        status = "TIDAK LOLOS" if "TIDAK" in raw_status else "LOLOS"
+        
+        no_urut = row[h_lolos_map.get('no_urut')] if 'no_urut' in h_lolos_map and h_lolos_map['no_urut'] < len(row) else None
+        alamat = str(row[h_lolos_map.get('alamat')]).strip() if 'alamat' in h_lolos_map and h_lolos_map['alamat'] < len(row) and row[h_lolos_map['alamat']] is not None else None
+        desa = str(row[h_lolos_map.get('desa_kelurahan')]).strip().upper() if 'desa_kelurahan' in h_lolos_map and h_lolos_map['desa_kelurahan'] < len(row) and row[h_lolos_map['desa_kelurahan']] is not None else None
+        kec = str(row[h_lolos_map.get('kecamatan')]).strip().upper() if 'kecamatan' in h_lolos_map and h_lolos_map['kecamatan'] < len(row) and row[h_lolos_map['kecamatan']] is not None else None
+        kab_row = str(row[h_lolos_map.get('kabupaten_kota')]).strip().upper() if 'kabupaten_kota' in h_lolos_map and h_lolos_map['kabupaten_kota'] < len(row) and row[h_lolos_map['kabupaten_kota']] is not None else None
+        kab = kab_row if kab_row and kab_row != 'NONE' else kab_clean
+        
+        tahap = str(row[h_lolos_map.get('tahap')]).strip() if 'tahap' in h_lolos_map and h_lolos_map['tahap'] < len(row) and row[h_lolos_map['tahap']] is not None else None
+        tanggal = str(row[h_lolos_map.get('tanggal')]).strip() if 'tanggal' in h_lolos_map and h_lolos_map['tanggal'] < len(row) and row[h_lolos_map['tanggal']] is not None else None
+        keterangan = str(row[h_lolos_map.get('keterangan')]).strip() if 'keterangan' in h_lolos_map and h_lolos_map['keterangan'] < len(row) and row[h_lolos_map['keterangan']] is not None else None
+        jenis_kelamin = str(row[h_lolos_map.get('jenis_kelamin')]).strip().upper() if 'jenis_kelamin' in h_lolos_map and h_lolos_map['jenis_kelamin'] < len(row) and row[h_lolos_map['jenis_kelamin']] is not None else None
+        
+        dup = is_duplicate(no_ktp, no_kk, status)
+        if dup: stats["duplicates"] += 1
+        if status == 'LOLOS': stats["lolos"] += 1
+        else: stats["tidak_lolos"] += 1
+        
+        cursor.execute("""
+            INSERT INTO verified_records (
+                batch_id, no_urut, nama, jenis_kelamin, no_ktp, no_kk,
+                alamat, desa_kelurahan, kecamatan, kabupaten_kota,
+                status, tahap, tanggal, keterangan, is_duplicate_in_previous
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (batch_id, no_urut, nama, jenis_kelamin, no_ktp, no_kk,
+              alamat, desa, kec, kab,
+              status, tahap, tanggal, keterangan, dup))
+
+    for row in data_tidak:
+        nama = str(row[h_tidak_map.get('nama')]).strip().upper() if 'nama' in h_tidak_map and h_tidak_map['nama'] < len(row) and row[h_tidak_map['nama']] is not None else None
+        if not nama or nama == 'NONE' or nama == '':
+            continue
+            
+        no_ktp_raw = str(row[h_tidak_map.get('no_ktp')]).strip() if 'no_ktp' in h_tidak_map and h_tidak_map['no_ktp'] < len(row) and row[h_tidak_map['no_ktp']] is not None else ""
+        no_ktp = clean_nik(no_ktp_raw)
+        
+        no_kk_raw = str(row[h_tidak_map.get('no_kk')]).strip() if 'no_kk' in h_tidak_map and h_tidak_map['no_kk'] < len(row) and row[h_tidak_map['no_kk']] is not None else ""
+        no_kk = clean_nik(no_kk_raw)
+        
+        no_urut = row[h_tidak_map.get('no_urut')] if 'no_urut' in h_tidak_map and h_tidak_map['no_urut'] < len(row) else None
+        alamat = str(row[h_tidak_map.get('alamat')]).strip() if 'alamat' in h_tidak_map and h_tidak_map['alamat'] < len(row) and row[h_tidak_map['alamat']] is not None else None
+        desa = str(row[h_tidak_map.get('desa_kelurahan')]).strip().upper() if 'desa_kelurahan' in h_tidak_map and h_tidak_map['desa_kelurahan'] < len(row) and row[h_tidak_map['desa_kelurahan']] is not None else None
+        kec = str(row[h_tidak_map.get('kecamatan')]).strip().upper() if 'kecamatan' in h_tidak_map and h_tidak_map['kecamatan'] < len(row) and row[h_tidak_map['kecamatan']] is not None else None
+        kab_row = str(row[h_tidak_map.get('kabupaten_kota')]).strip().upper() if 'kabupaten_kota' in h_tidak_map and h_tidak_map['kabupaten_kota'] < len(row) and row[h_tidak_map['kabupaten_kota']] is not None else None
+        kab = kab_row if kab_row and kab_row != 'NONE' else kab_clean
+        
+        alasan = str(row[h_tidak_map.get('alasan_tidak_lolos')]).strip() if 'alasan_tidak_lolos' in h_tidak_map and h_tidak_map['alasan_tidak_lolos'] < len(row) and row[h_tidak_map['alasan_tidak_lolos']] is not None else None
+        tahap = str(row[h_tidak_map.get('tahap')]).strip() if 'tahap' in h_tidak_map and h_tidak_map['tahap'] < len(row) and row[h_tidak_map['tahap']] is not None else None
+        tanggal = str(row[h_tidak_map.get('tanggal')]).strip() if 'tanggal' in h_tidak_map and h_tidak_map['tanggal'] < len(row) and row[h_tidak_map['tanggal']] is not None else None
+        keterangan = str(row[h_tidak_map.get('keterangan')]).strip() if 'keterangan' in h_tidak_map and h_tidak_map['keterangan'] < len(row) and row[h_tidak_map['keterangan']] is not None else None
+        jenis_kelamin = str(row[h_tidak_map.get('jenis_kelamin')]).strip().upper() if 'jenis_kelamin' in h_tidak_map and h_tidak_map['jenis_kelamin'] < len(row) and row[h_tidak_map['jenis_kelamin']] is not None else None
+        
+        dup = is_duplicate(no_ktp, no_kk, 'TIDAK LOLOS')
+        if dup: stats["duplicates"] += 1
+        stats["tidak_lolos"] += 1
+        
+        cursor.execute("""
+            INSERT INTO verified_records (
+                batch_id, no_urut, nama, jenis_kelamin, no_ktp, no_kk,
+                alamat, desa_kelurahan, kecamatan, kabupaten_kota,
+                status, alasan_tidak_lolos, tahap, tanggal, keterangan, is_duplicate_in_previous
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'TIDAK LOLOS', ?, ?, ?, ?, ?)
+        """, (batch_id, no_urut, nama, jenis_kelamin, no_ktp, no_kk,
+              alamat, desa, kec, kab,
+              alasan, tahap, tanggal, keterangan, dup))
+        record_id = cursor.lastrowid
+        
+        nama_pengganti = str(row[h_tidak_map.get('nama_pengganti')]).strip().upper() if 'nama_pengganti' in h_tidak_map and h_tidak_map['nama_pengganti'] < len(row) and row[h_tidak_map['nama_pengganti']] is not None else None
+        if nama_pengganti and nama_pengganti != 'NONE' and nama_pengganti != '':
+            stats["replacements"] += 1
+            no_ktp_pengganti_raw = str(row[h_tidak_map.get('no_ktp_pengganti')]).strip() if 'no_ktp_pengganti' in h_tidak_map and h_tidak_map['no_ktp_pengganti'] < len(row) and row[h_tidak_map['no_ktp_pengganti']] is not None else ""
+            no_ktp_pengganti = clean_nik(no_ktp_pengganti_raw)
+            
+            no_kk_pengganti_raw = str(row[h_tidak_map.get('no_kk_pengganti')]).strip() if 'no_kk_pengganti' in h_tidak_map and h_tidak_map['no_kk_pengganti'] < len(row) and row[h_tidak_map['no_kk_pengganti']] is not None else ""
+            no_kk_pengganti = clean_nik(no_kk_pengganti_raw)
+            
+            jenis_kelamin_pengganti = str(row[h_tidak_map.get('jenis_kelamin_pengganti')]).strip().upper() if 'jenis_kelamin_pengganti' in h_tidak_map and h_tidak_map['jenis_kelamin_pengganti'] < len(row) and row[h_tidak_map['jenis_kelamin_pengganti']] is not None else None
+            alamat_pengganti = str(row[h_tidak_map.get('alamat_pengganti')]).strip() if 'alamat_pengganti' in h_tidak_map and h_tidak_map['alamat_pengganti'] < len(row) and row[h_tidak_map['alamat_pengganti']] is not None else None
+            desa_kelurahan_pengganti = str(row[h_tidak_map.get('desa_kelurahan_pengganti')]).strip().upper() if 'desa_kelurahan_pengganti' in h_tidak_map and h_tidak_map['desa_kelurahan_pengganti'] < len(row) and row[h_tidak_map['desa_kelurahan_pengganti']] is not None else None
+            kecamatan_pengganti = str(row[h_tidak_map.get('kecamatan_pengganti')]).strip().upper() if 'kecamatan_pengganti' in h_tidak_map and h_tidak_map['kecamatan_pengganti'] < len(row) and row[h_tidak_map['kecamatan_pengganti']] is not None else None
+            kabupaten_pengganti = str(row[h_tidak_map.get('kabupaten_pengganti')]).strip().upper() if 'kabupaten_pengganti' in h_tidak_map and h_tidak_map['kabupaten_pengganti'] < len(row) and row[h_tidak_map['kabupaten_pengganti']] is not None else kab_clean
+            
+            cursor.execute("""
+                INSERT INTO replacement_events (
+                    disqualified_record_id, nama_pengganti, jenis_kelamin_pengganti,
+                    no_ktp_pengganti, no_kk_pengganti, alamat_pengganti,
+                    desa_kelurahan_pengganti, kecamatan_pengganti, kabupaten_pengganti
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (record_id, nama_pengganti, jenis_kelamin_pengganti,
+                  no_ktp_pengganti, no_kk_pengganti, alamat_pengganti,
+                  desa_kelurahan_pengganti, kecamatan_pengganti, kabupaten_pengganti))
+            
+    conn.commit()
+    conn.close()
+    REKAP_CACHE.clear()
+    
+    return {
+        "batch_id": batch_id,
+        "batch_name": batch_name,
+        "kabupaten": kab_clean,
+        "stats": stats
+    }
+
 @app.get("/api/stage/{stage_id}/summary")
 def get_stage_summary(stage_id: int):
     conn = get_db_connection()
@@ -598,22 +856,22 @@ def get_stage_summary(stage_id: int):
     cursor.execute("SELECT id, revision_num, filename FROM invers_revisions WHERE stage_id = ? AND is_active = 1", (stage_id,))
     active_rev = cursor.fetchone()
     
-    cursor.execute("SELECT id, name, uploaded_at, is_published, nomor_ba, tanggal_ba, sort_order FROM verified_batches WHERE stage_id = ? ORDER BY sort_order ASC, uploaded_at ASC, id ASC", (stage_id,))
+    cursor.execute("SELECT id, name, uploaded_at, is_published, nomor_ba, tanggal_ba, sort_order FROM verified_batches WHERE stage_id = ? AND (batch_type = 'REGULAR' OR batch_type IS NULL) ORDER BY sort_order ASC, uploaded_at ASC, id ASC", (stage_id,))
     batches = [dict(row) for row in cursor.fetchall()]
     
-    lolos_total = 0
-    tidak_lolos_total = 0
-    replacement_total = 0
+    lolos_reg = 0
+    tidak_lolos_reg = 0
+    replacement_reg = 0
     
     for b in batches:
         cursor.execute("SELECT COUNT(*) as cnt FROM verified_records WHERE batch_id = ? AND status = 'LOLOS'", (b['id'],))
         l_cnt = cursor.fetchone()['cnt']
-        lolos_total += l_cnt
+        lolos_reg += l_cnt
         b['lolos_count'] = l_cnt
         
         cursor.execute("SELECT COUNT(*) as cnt FROM verified_records WHERE batch_id = ? AND status = 'TIDAK LOLOS'", (b['id'],))
         tl_cnt = cursor.fetchone()['cnt']
-        tidak_lolos_total += tl_cnt
+        tidak_lolos_reg += tl_cnt
         b['tidak_lolos_count'] = tl_cnt
         
         cursor.execute("""
@@ -622,19 +880,262 @@ def get_stage_summary(stage_id: int):
             WHERE vr.batch_id = ?
         """, (b['id'],))
         r_cnt = cursor.fetchone()['cnt']
-        replacement_total += r_cnt
+        replacement_reg += r_cnt
         b['replacement_count'] = r_cnt
-        
+
+    # Hitung data verifikasi verfal pada tahap ini
+    cursor.execute("""
+        SELECT vr.status, COUNT(*) as cnt
+        FROM verified_records vr
+        JOIN verified_batches vb ON vr.batch_id = vb.id
+        WHERE vb.stage_id = ? AND vb.batch_type = 'VERFAL'
+        GROUP BY vr.status
+    """, (stage_id,))
+    verfal_status_counts = {r['status']: r['cnt'] for r in cursor.fetchall()}
+    lolos_verfal = verfal_status_counts.get('LOLOS', 0)
+    tidak_lolos_verfal = verfal_status_counts.get('TIDAK LOLOS', 0)
+    
+    cursor.execute("""
+        SELECT COUNT(*) as cnt FROM replacement_events re
+        JOIN verified_records vr ON re.disqualified_record_id = vr.id
+        JOIN verified_batches vb ON vr.batch_id = vb.id
+        WHERE vb.stage_id = ? AND vb.batch_type = 'VERFAL'
+    """, (stage_id,))
+    replacement_verfal = cursor.fetchone()['cnt']
+    
     conn.close()
+    
+    lolos_combined = lolos_reg + lolos_verfal
+    tidak_lolos_combined = tidak_lolos_reg + tidak_lolos_verfal
+    total_verified_combined = lolos_combined + tidak_lolos_combined
+    replacement_combined = replacement_reg + replacement_verfal
     
     return {
         "active_revision": dict(active_rev) if active_rev else None,
         "batches": batches,
         "totals": {
-            "lolos": lolos_total,
-            "tidak_lolos": tidak_lolos_total,
-            "replacements": replacement_total,
-            "total_verified": lolos_total + tidak_lolos_total
+            "lolos": lolos_combined,
+            "tidak_lolos": tidak_lolos_combined,
+            "replacements": replacement_combined,
+            "total_verified": total_verified_combined,
+            "regular": {
+                "lolos": lolos_reg,
+                "tidak_lolos": tidak_lolos_reg,
+                "total": lolos_reg + tidak_lolos_reg,
+                "replacements": replacement_reg
+            },
+            "verfal": {
+                "lolos": lolos_verfal,
+                "tidak_lolos": tidak_lolos_verfal,
+                "total": lolos_verfal + tidak_lolos_verfal,
+                "replacements": replacement_verfal
+            }
+        }
+    }
+
+@app.get("/api/stage/{stage_id}/verfal-batches-grouped")
+def get_verfal_batches_grouped(stage_id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # 1. Daftar seluruh Kabupaten pada tahap aktif
+    cursor.execute("""
+        SELECT DISTINCT UPPER(TRIM(ir.kabupaten_kota)) as kab
+        FROM invers_records ir
+        JOIN invers_revisions irv ON ir.revision_id = irv.id
+        WHERE irv.stage_id = ? AND irv.is_active = 1 AND TRIM(COALESCE(ir.kabupaten_kota, '')) != ''
+        UNION
+        SELECT DISTINCT UPPER(TRIM(COALESCE(vb.kabupaten, vr.kabupaten_kota))) as kab
+        FROM verified_records vr
+        JOIN verified_batches vb ON vr.batch_id = vb.id
+        WHERE vb.stage_id = ? AND TRIM(COALESCE(vb.kabupaten, vr.kabupaten_kota, '')) != ''
+        ORDER BY kab ASC
+    """, (stage_id, stage_id))
+    all_kabupaten = [r['kab'] for r in cursor.fetchall()]
+    
+    # 2. Alokasi INVERS per kabupaten
+    cursor.execute("""
+        SELECT UPPER(TRIM(ir.kabupaten_kota)) as kab, COUNT(*) as cnt
+        FROM invers_records ir
+        JOIN invers_revisions irv ON ir.revision_id = irv.id
+        WHERE irv.stage_id = ? AND irv.is_active = 1
+        GROUP BY UPPER(TRIM(ir.kabupaten_kota))
+    """, (stage_id,))
+    alokasi_map = {r['kab']: r['cnt'] for r in cursor.fetchall()}
+    
+    # 3. Verifikasi Reguler per kabupaten
+    cursor.execute("""
+        SELECT UPPER(TRIM(vr.kabupaten_kota)) as kab, vr.status, COUNT(*) as cnt
+        FROM verified_records vr
+        JOIN verified_batches vb ON vr.batch_id = vb.id
+        WHERE vb.stage_id = ? AND (vb.batch_type = 'REGULAR' OR vb.batch_type IS NULL)
+          AND TRIM(COALESCE(vr.kabupaten_kota, '')) != ''
+        GROUP BY UPPER(TRIM(vr.kabupaten_kota)), vr.status
+    """, (stage_id,))
+    reg_counts = {}
+    for r in cursor.fetchall():
+        kab = r['kab']
+        if kab not in reg_counts:
+            reg_counts[kab] = {'lolos': 0, 'tidak_lolos': 0, 'total': 0, 'pengganti': 0}
+        if r['status'] == 'LOLOS':
+            reg_counts[kab]['lolos'] += r['cnt']
+        else:
+            reg_counts[kab]['tidak_lolos'] += r['cnt']
+        reg_counts[kab]['total'] += r['cnt']
+
+    cursor.execute("""
+        SELECT UPPER(TRIM(vr.kabupaten_kota)) as kab, COUNT(*) as cnt
+        FROM replacement_events re
+        JOIN verified_records vr ON re.disqualified_record_id = vr.id
+        JOIN verified_batches vb ON vr.batch_id = vb.id
+        WHERE vb.stage_id = ? AND (vb.batch_type = 'REGULAR' OR vb.batch_type IS NULL)
+        GROUP BY UPPER(TRIM(vr.kabupaten_kota))
+    """, (stage_id,))
+    for r in cursor.fetchall():
+        kab = r['kab']
+        if kab not in reg_counts:
+            reg_counts[kab] = {'lolos': 0, 'tidak_lolos': 0, 'total': 0, 'pengganti': 0}
+        reg_counts[kab]['pengganti'] = r['cnt']
+
+    # 4. Verifikasi Verfal per kabupaten & Batch Verfal
+    cursor.execute("""
+        SELECT id, name, uploaded_at, is_published, nomor_ba, tanggal_ba, sort_order, kabupaten, metadata_json
+        FROM verified_batches
+        WHERE stage_id = ? AND batch_type = 'VERFAL'
+        ORDER BY sort_order ASC, uploaded_at ASC, id ASC
+    """, (stage_id,))
+    all_batches = [dict(r) for r in cursor.fetchall()]
+    
+    verfal_batch_counts = {}
+    for b in all_batches:
+        b_id = b['id']
+        cursor.execute("SELECT COUNT(*) as cnt FROM verified_records WHERE batch_id = ? AND status = 'LOLOS'", (b_id,))
+        l_cnt = cursor.fetchone()['cnt']
+        cursor.execute("SELECT COUNT(*) as cnt FROM verified_records WHERE batch_id = ? AND status = 'TIDAK LOLOS'", (b_id,))
+        tl_cnt = cursor.fetchone()['cnt']
+        cursor.execute("""
+            SELECT COUNT(*) as cnt FROM replacement_events re
+            JOIN verified_records vr ON re.disqualified_record_id = vr.id
+            WHERE vr.batch_id = ?
+        """, (b_id,))
+        rep_cnt = cursor.fetchone()['cnt']
+        
+        b['lolos_count'] = l_cnt
+        b['tidak_lolos_count'] = tl_cnt
+        b['replacement_count'] = rep_cnt
+        b['verifikasi_count'] = l_cnt + tl_cnt
+        
+        kab_key = (b.get('kabupaten') or '').strip().upper()
+        if kab_key not in verfal_batch_counts:
+            verfal_batch_counts[kab_key] = []
+        verfal_batch_counts[kab_key].append(b)
+        
+    conn.close()
+    
+    kabupaten_groups = []
+    g_verif = 0
+    g_lolos = 0
+    g_tidak = 0
+    g_pengganti = 0
+    g_alokasi = 0
+
+    g_verif_reg = 0
+    g_lolos_reg = 0
+    g_tidak_reg = 0
+    g_rep_reg = 0
+
+    g_verif_verfal = 0
+    g_lolos_verfal = 0
+    g_tidak_verfal = 0
+    g_rep_verfal = 0
+    
+    for kab in all_kabupaten:
+        b_list = verfal_batch_counts.get(kab, [])
+        kab_alokasi = alokasi_map.get(kab, 0)
+        
+        # Verfal numbers for this kabupaten
+        v_verif = sum(b['verifikasi_count'] for b in b_list)
+        v_lolos = sum(b['lolos_count'] for b in b_list)
+        v_tidak = sum(b['tidak_lolos_count'] for b in b_list)
+        v_pengganti = sum(b['replacement_count'] for b in b_list)
+
+        # Reguler numbers for this kabupaten
+        r_info = reg_counts.get(kab, {'lolos': 0, 'tidak_lolos': 0, 'total': 0, 'pengganti': 0})
+        r_verif = r_info['total']
+        r_lolos = r_info['lolos']
+        r_tidak = r_info['tidak_lolos']
+        r_pengganti = r_info.get('pengganti', 0)
+
+        # Combined numbers for this kabupaten
+        c_verif = v_verif + r_verif
+        c_lolos = v_lolos + r_lolos
+        c_tidak = v_tidak + r_tidak
+        c_pengganti = v_pengganti + r_pengganti
+
+        g_alokasi += kab_alokasi
+        g_verif += c_verif
+        g_lolos += c_lolos
+        g_tidak += c_tidak
+        g_pengganti += c_pengganti
+
+        g_verif_reg += r_verif
+        g_lolos_reg += r_lolos
+        g_tidak_reg += r_tidak
+        g_rep_reg += r_pengganti
+
+        g_verif_verfal += v_verif
+        g_lolos_verfal += v_lolos
+        g_tidak_verfal += v_tidak
+        g_rep_verfal += v_pengganti
+        
+        kabupaten_groups.append({
+            "kabupaten": kab,
+            "total_alokasi_invers": kab_alokasi,
+            "batches": b_list,
+            "totals": {
+                "batches_count": len(b_list),
+                "verifikasi": c_verif,
+                "lolos": c_lolos,
+                "tidak_lolos": c_tidak,
+                "pengganti": c_pengganti,
+                "belum_verifikasi": max(0, kab_alokasi - c_verif),
+                "regular": {
+                    "verifikasi": r_verif,
+                    "lolos": r_lolos,
+                    "tidak_lolos": r_tidak,
+                    "pengganti": r_pengganti
+                },
+                "verfal": {
+                    "verifikasi": v_verif,
+                    "lolos": v_lolos,
+                    "tidak_lolos": v_tidak,
+                    "pengganti": v_pengganti,
+                    "batches_count": len(b_list)
+                }
+            }
+        })
+        
+    return {
+        "kabupaten_groups": kabupaten_groups,
+        "grand_totals": {
+            "alokasi": g_alokasi,
+            "verifikasi": g_verif,
+            "lolos": g_lolos,
+            "tidak_lolos": g_tidak,
+            "pengganti": g_pengganti,
+            "belum_verifikasi": max(0, g_alokasi - g_verif),
+            "regular": {
+                "verifikasi": g_verif_reg,
+                "lolos": g_lolos_reg,
+                "tidak_lolos": g_tidak_reg,
+                "pengganti": g_rep_reg
+            },
+            "verfal": {
+                "verifikasi": g_verif_verfal,
+                "lolos": g_lolos_verfal,
+                "tidak_lolos": g_tidak_verfal,
+                "pengganti": g_rep_verfal
+            }
         }
     }
 
@@ -919,12 +1420,10 @@ def bulk_update_verified_records_status(body: dict = Body(...)):
     except Exception as e:
         conn.rollback()
         conn.close()
-        raise HTTPException(status_code=500, detail=f"Gagal mengolah pembaruan status massal: {str(e)}")
-    conn.close()
     return {"status": "success", "updated_count": len(record_ids), "new_status": new_status, "message": f"{len(record_ids)} CPB berhasil diubah statusnya menjadi {new_status}"}
 
 @app.get("/api/stage/{stage_id}/records")
-def get_stage_records(stage_id: int):
+def get_stage_records(stage_id: int, batch_type: str = "ALL"):
     conn = get_db_connection()
     cursor = conn.cursor()
     
@@ -935,18 +1434,28 @@ def get_stage_records(stage_id: int):
     """, (stage_id,))
     invers_rows = [dict(row) for row in cursor.fetchall()]
     
-    cursor.execute("""
+    if batch_type.upper() == 'VERFAL':
+        vb_filter = "vb.stage_id = ? AND vb.batch_type = 'VERFAL'"
+        ro_filter = "stage_id = ? AND batch_type = 'VERFAL'"
+    elif batch_type.upper() == 'ALL':
+        vb_filter = "vb.stage_id = ?"
+        ro_filter = "stage_id = ?"
+    else:
+        vb_filter = "vb.stage_id = ? AND (vb.batch_type = 'REGULAR' OR vb.batch_type IS NULL)"
+        ro_filter = "stage_id = ? AND (batch_type = 'REGULAR' OR batch_type IS NULL)"
+
+    cursor.execute(f"""
         SELECT vr.*, vb.name as batch_name, 
                re.nama_pengganti, re.no_ktp_pengganti, re.no_kk_pengganti, re.alamat_pengganti,
                re.desa_kelurahan_pengganti, re.kecamatan_pengganti, re.kabupaten_pengganti
         FROM verified_records vr
         JOIN verified_batches vb ON vr.batch_id = vb.id
         LEFT JOIN replacement_events re ON re.disqualified_record_id = vr.id
-        WHERE vb.stage_id = ?
+        WHERE {vb_filter}
     """, (stage_id,))
     verified_rows = [dict(row) for row in cursor.fetchall()]
     
-    cursor.execute("SELECT * FROM reconciliation_overrides WHERE stage_id = ?", (stage_id,))
+    cursor.execute(f"SELECT * FROM reconciliation_overrides WHERE {ro_filter}", (stage_id,))
     overrides = {row['original_no_ktp']: dict(row) for row in cursor.fetchall()}
     
     conn.close()
@@ -977,13 +1486,12 @@ def get_stage_records(stage_id: int):
     mismatch_count = 0
     
     for vr in verified_rows:
-        nik = vr['no_ktp'].strip()
-        kk = vr['no_kk'].strip()
-        nama = vr['nama'].strip()
-        
+        nama = (vr.get('nama') or '').strip()
+        nik = (vr.get('no_ktp') or '').strip()
+        kk = (vr.get('no_kk') or '').strip()
         errors = []
-        is_mismatch = False
         mismatch_type = ""
+        is_mismatch = False
         vr['expected_invers'] = None
         
         if len(nik) != 16:
@@ -1137,8 +1645,8 @@ def save_reconciliation_override(
 
 @app.get("/api/stage/{stage_id}/overview-stats")
 def get_overview_stats(stage_id: int):
-    # Ambil semua data
-    data = get_stage_records(stage_id)
+    # Ambil semua data (gabungan Reguler dan Verfal)
+    data = get_stage_records(stage_id, batch_type="ALL")
     invers = data["invers_records"]
     verified = data["verified_records"]
     
@@ -1198,7 +1706,7 @@ def get_overview_stats(stage_id: int):
 
 @app.get("/api/stage/{stage_id}/overview-tables")
 def get_overview_tables(stage_id: int):
-    data = get_stage_records(stage_id)
+    data = get_stage_records(stage_id, batch_type="ALL")
     invers = data["invers_records"]
     verified = data["verified_records"]
     
@@ -1635,6 +2143,11 @@ def download_template(template_type: str):
     elif template_type == "sk_dirjen":
         filepath = os.path.join(BASE_DIR, "TEMPLATE SK DIRJEN.xlsx")
         filename = "TEMPLATE_SK_DIRJEN.xlsx"
+    elif template_type == "verfal":
+        filepath = os.path.join(BASE_DIR, "templates", "TEMPLATE_VERFAL.xlsx")
+        if not os.path.exists(filepath):
+            filepath = os.path.join(BASE_DIR, "TEMPLATE_VERFAL.xlsx")
+        filename = "TEMPLATE_VERFAL.xlsx"
     else:
         raise HTTPException(status_code=400, detail="Tipe template tidak dikenal")
         
@@ -2210,6 +2723,714 @@ def delete_verified_record(record_id: int):
     return {"message": "Data verifikasi berhasil dihapus"}
 
 # --- BULK OPERATIONS ---
+
+@app.post("/api/export/verfal/docx")
+async def export_verfal_docx(
+    batch_id: int = Form(...),
+    nomor_ba_verfal: str = Form(""),
+    tahun_anggaran: str = Form("2026"),
+    nomor_ba_versul: str = Form(""),
+    tanggal_ba_verfal: str = Form(""),
+    total_alokasi_versul: str = Form(""),
+    total_alokasi_invers: str = Form(""),
+    nama_pejabat_ketua_tim: str = Form(""),
+    nama_pejabat_kepala_balai: str = Form(""),
+    tanggal_terbit_ba_verfal: str = Form(""),
+    alasan_tidak_lolos_terbanyak: str = Form("")
+):
+    import json
+    import docx
+    from docx.shared import Pt, Inches
+    from collections import Counter
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT vb.*, s.name as stage_name, p.name as province_name
+        FROM verified_batches vb
+        JOIN invers_stages s ON vb.stage_id = s.id
+        LEFT JOIN provinces p ON s.province_id = p.id
+        WHERE vb.id = ?
+    """, (batch_id,))
+    batch = cursor.fetchone()
+    if not batch:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Batch Verfal tidak ditemukan")
+        
+    stage_id = batch['stage_id']
+    stage_name = batch['stage_name']
+    prov_name = batch['province_name'] or "SULAWESI SELATAN"
+    kab_name = (batch['kabupaten'] or "").upper().strip()
+    batch_name = batch['name']
+    
+    meta = {
+        "nomor_ba_verfal": nomor_ba_verfal,
+        "tahun_anggaran": tahun_anggaran,
+        "nomor_ba_versul": nomor_ba_versul,
+        "tanggal_ba_verfal": tanggal_ba_verfal,
+        "total_alokasi_versul": total_alokasi_versul,
+        "total_alokasi_invers": total_alokasi_invers,
+        "nama_pejabat_ketua_tim": nama_pejabat_ketua_tim,
+        "nama_pejabat_kepala_balai": nama_pejabat_kepala_balai,
+        "tanggal_terbit_ba_verfal": tanggal_terbit_ba_verfal,
+        "alasan_tidak_lolos_terbanyak": alasan_tidak_lolos_terbanyak
+    }
+    cursor.execute("""
+        UPDATE verified_batches
+        SET nomor_ba = ?, tanggal_ba = ?, metadata_json = ?
+        WHERE id = ?
+    """, (nomor_ba_verfal, tanggal_ba_verfal, json.dumps(meta), batch_id))
+    conn.commit()
+    
+    if not total_alokasi_invers:
+        cursor.execute("""
+            SELECT COUNT(*) as cnt FROM invers_records ir
+            JOIN invers_revisions irv ON ir.revision_id = irv.id
+            WHERE irv.stage_id = ? AND irv.is_active = 1 AND UPPER(TRIM(ir.kabupaten_kota)) = UPPER(?)
+        """, (stage_id, kab_name))
+        total_alokasi_invers = str(cursor.fetchone()['cnt'])
+        
+    cursor.execute("""
+        SELECT vr.*, re.nama_pengganti, re.jenis_kelamin_pengganti, re.no_ktp_pengganti,
+               re.no_kk_pengganti, re.alamat_pengganti, re.desa_kelurahan_pengganti,
+               re.kecamatan_pengganti, re.kabupaten_pengganti
+        FROM verified_records vr
+        LEFT JOIN replacement_events re ON re.disqualified_record_id = vr.id
+        WHERE vr.batch_id = ?
+        ORDER BY vr.no_urut ASC, vr.id ASC
+    """, (batch_id,))
+    records = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    
+    lolos_records = [r for r in records if r['status'] == 'LOLOS']
+    tidak_lolos_records = [r for r in records if r['status'] == 'TIDAK LOLOS']
+    
+    count_lolos = len(lolos_records)
+    count_tidak_lolos = len(tidak_lolos_records)
+    
+    months_id = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
+    tgl_val = ""
+    bln_val = ""
+    thn_val = tahun_anggaran
+    if "-" in tanggal_ba_verfal:
+        parts = tanggal_ba_verfal.split("-")
+        if len(parts) == 3:
+            thn_val = parts[0]
+            try:
+                m_idx = int(parts[1]) - 1
+                bln_val = months_id[m_idx] if 0 <= m_idx < 12 else parts[1]
+            except Exception:
+                bln_val = parts[1]
+            tgl_val = str(int(parts[2])) if parts[2].isdigit() else parts[2]
+    elif " " in tanggal_ba_verfal:
+        parts = tanggal_ba_verfal.split(" ")
+        if len(parts) >= 3:
+            tgl_val = parts[0]
+            bln_val = parts[1]
+            thn_val = parts[2]
+    else:
+        tgl_val = tanggal_ba_verfal
+        bln_val = ""
+        
+    if not alasan_tidak_lolos_terbanyak and tidak_lolos_records:
+        reasons = [r['alasan_tidak_lolos'] for r in tidak_lolos_records if r['alasan_tidak_lolos']]
+        if reasons:
+            most_common = Counter(reasons).most_common(1)
+            alasan_tidak_lolos_terbanyak = most_common[0][0]
+    if not alasan_tidak_lolos_terbanyak:
+        alasan_tidak_lolos_terbanyak = "-"
+    
+    template_candidates = [
+        os.path.join(BASE_DIR, "FORMAT BERITA ACARA VERFAL.docx"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates", "FORMAT BERITA ACARA VERFAL.docx"),
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "FORMAT BA VERFAL.docx"),
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "templates", "FORMAT BERITA ACARA VERFAL.docx"),
+        os.path.join(os.getcwd(), "templates", "FORMAT BERITA ACARA VERFAL.docx"),
+        os.path.join(os.getcwd(), "backend", "templates", "FORMAT BERITA ACARA VERFAL.docx"),
+        os.path.join(os.getcwd(), "FORMAT BA VERFAL.docx")
+    ]
+    template_path = None
+    for candidate in template_candidates:
+        if os.path.exists(candidate):
+            template_path = candidate
+            break
+            
+    if not template_path:
+        raise HTTPException(status_code=404, detail="Template FORMAT BERITA ACARA VERFAL.docx tidak ditemukan")
+        
+    doc = docx.Document(template_path)
+    
+    replacements = {
+        "[Nomor BA Verfal]": nomor_ba_verfal,
+        "[Tahun Anggaran]": tahun_anggaran,
+        "[Nomor BA Versul]": nomor_ba_versul,
+        "[Tanggal BA Verfal]": tgl_val,
+        "[Bulan BA Verfal]": bln_val,
+        "[Tahun BA Verfal]": thn_val,
+        "[Total Alokasi Invers]": str(total_alokasi_invers),
+        "[Kabupaten Aktif]": kab_name,
+        "[Provinsi Aktif]": prov_name,
+        "[Total Alokasi Versul]": str(total_alokasi_versul or total_alokasi_invers),
+        "[Jumlah lolos]": str(count_lolos),
+        "[Jumlah Tidak lolos]": str(count_tidak_lolos),
+        "[Alasan Tidak lolos terbanyak]": alasan_tidak_lolos_terbanyak,
+        "[Nama Pejabat Kepala Balai]": nama_pejabat_kepala_balai or "( ................................................. )",
+        "[Tanggal Terbit BA Verfal]": tanggal_terbit_ba_verfal or f"{kab_name.title()}, {tgl_val} {bln_val} {thn_val}",
+        "[Nama Pejabat Ketua Tim]": nama_pejabat_ketua_tim or "( ................................................. )"
+    }
+    
+    for p in doc.paragraphs:
+        for k, v in replacements.items():
+            if k in p.text:
+                for run in p.runs:
+                    if k in run.text:
+                        run.text = run.text.replace(k, str(v))
+                if k in p.text:
+                    p.text = p.text.replace(k, str(v))
+    for t in doc.tables:
+        for row in t.rows:
+            for cell in row.cells:
+                for p in cell.paragraphs:
+                    for k, v in replacements.items():
+                        if k in p.text:
+                            for run in p.runs:
+                                if k in run.text:
+                                    run.text = run.text.replace(k, str(v))
+                            if k in p.text:
+                                p.text = p.text.replace(k, str(v))
+                                
+    # Add Lampiran I (Rekapitulasi)
+    doc.add_page_break()
+    p_lamp1_title = doc.add_paragraph()
+    p_lamp1_title.alignment = docx.enum.text.WD_ALIGN_PARAGRAPH.CENTER
+    r_l1 = p_lamp1_title.add_run(f"LAMPIRAN I BERITA ACARA NOMOR : {nomor_ba_verfal}\nREKAPITULASI HASIL VERIFIKASI FAKTUAL CALON PENERIMA BANTUAN\nBEDAH RUMAH TAHUN {tahun_anggaran}\nKABUPATEN {kab_name} PROVINSI {prov_name}")
+    r_l1.bold = True
+    r_l1.font.name = 'Bookman Old Style'
+    r_l1.font.size = Pt(11)
+    
+    desa_agg = {}
+    for r in records:
+        kec = (r['kecamatan'] or "LAINNYA").strip().upper()
+        desa = (r['desa_kelurahan'] or "LAINNYA").strip().upper()
+        if kec not in desa_agg:
+            desa_agg[kec] = {}
+        if desa not in desa_agg[kec]:
+            desa_agg[kec][desa] = {"alokasi": 0, "lolos": 0, "tidak_lolos": 0, "pengganti": 0}
+            
+        desa_agg[kec][desa]["alokasi"] += 1
+        if r['status'] == 'LOLOS':
+            desa_agg[kec][desa]["lolos"] += 1
+        else:
+            desa_agg[kec][desa]["tidak_lolos"] += 1
+            if r.get('nama_pengganti'):
+                desa_agg[kec][desa]["pengganti"] += 1
+                
+    table_l1 = doc.add_table(rows=1, cols=7)
+    table_l1.style = 'Table Grid'
+    hdr_cells = table_l1.rows[0].cells
+    hdr_titles = ["NO.", "KECAMATAN", "DESA / KELURAHAN", "TOTAL ALOKASI", "LOLOS", "TIDAK LOLOS", "PENGGANTI"]
+    for i, title in enumerate(hdr_titles):
+        hdr_cells[i].text = title
+        hdr_cells[i].paragraphs[0].alignment = docx.enum.text.WD_ALIGN_PARAGRAPH.CENTER
+        for run in hdr_cells[i].paragraphs[0].runs:
+            run.bold = True
+            run.font.name = 'Bookman Old Style'
+            run.font.size = Pt(9)
+            
+    no_idx = 1
+    t_alo = t_lol = t_tdk = t_pg = 0
+    for kec, desas in sorted(desa_agg.items()):
+        for desa, stats in sorted(desas.items()):
+            row_cells = table_l1.add_row().cells
+            row_cells[0].text = str(no_idx)
+            row_cells[1].text = kec
+            row_cells[2].text = desa
+            row_cells[3].text = str(stats["alokasi"])
+            row_cells[4].text = str(stats["lolos"])
+            row_cells[5].text = str(stats["tidak_lolos"])
+            row_cells[6].text = str(stats["pengganti"])
+            
+            t_alo += stats["alokasi"]
+            t_lol += stats["lolos"]
+            t_tdk += stats["tidak_lolos"]
+            t_pg += stats["pengganti"]
+            
+            for i in range(7):
+                p = row_cells[i].paragraphs[0]
+                if i in (0, 3, 4, 5, 6):
+                    p.alignment = docx.enum.text.WD_ALIGN_PARAGRAPH.CENTER
+                for run in p.runs:
+                    run.font.name = 'Bookman Old Style'
+                    run.font.size = Pt(9)
+            no_idx += 1
+            
+    tot_cells = table_l1.add_row().cells
+    tot_cells[0].text = "TOTAL"
+    tot_cells[3].text = str(t_alo)
+    tot_cells[4].text = str(t_lol)
+    tot_cells[5].text = str(t_tdk)
+    tot_cells[6].text = str(t_pg)
+    for i in range(7):
+        p = tot_cells[i].paragraphs[0]
+        if i in (0, 3, 4, 5, 6):
+            p.alignment = docx.enum.text.WD_ALIGN_PARAGRAPH.CENTER
+        for run in p.runs:
+            run.bold = True
+            run.font.name = 'Bookman Old Style'
+            run.font.size = Pt(9)
+            
+    # Add Lampiran II (Daftar Lolos)
+    doc.add_page_break()
+    p_lamp2_title = doc.add_paragraph()
+    p_lamp2_title.alignment = docx.enum.text.WD_ALIGN_PARAGRAPH.CENTER
+    r_l2 = p_lamp2_title.add_run(f"LAMPIRAN II BERITA ACARA NOMOR : {nomor_ba_verfal}\nDAFTAR CALON PENERIMA BANTUAN HASIL VERIFIKASI FAKTUAL (LOLOS)\nBEDAH RUMAH TAHUN {tahun_anggaran}\nKABUPATEN {kab_name} PROVINSI {prov_name}")
+    r_l2.bold = True
+    r_l2.font.name = 'Bookman Old Style'
+    r_l2.font.size = Pt(11)
+    
+    table_l2 = doc.add_table(rows=1, cols=6)
+    table_l2.style = 'Table Grid'
+    hdr_cells2 = table_l2.rows[0].cells
+    hdr_titles2 = ["NO.", "NAMA", "NO. KTP", "NO. KK", "DESA / KELURAHAN", "KECAMATAN"]
+    for i, title in enumerate(hdr_titles2):
+        hdr_cells2[i].text = title
+        hdr_cells2[i].paragraphs[0].alignment = docx.enum.text.WD_ALIGN_PARAGRAPH.CENTER
+        for run in hdr_cells2[i].paragraphs[0].runs:
+            run.bold = True
+            run.font.name = 'Bookman Old Style'
+            run.font.size = Pt(9)
+            
+    for idx, r in enumerate(lolos_records):
+        row_cells = table_l2.add_row().cells
+        row_cells[0].text = str(idx + 1)
+        row_cells[1].text = r['nama'] or ""
+        row_cells[2].text = r['no_ktp'] or ""
+        row_cells[3].text = r['no_kk'] or ""
+        row_cells[4].text = r['desa_kelurahan'] or ""
+        row_cells[5].text = r['kecamatan'] or ""
+        for i in range(6):
+            p = row_cells[i].paragraphs[0]
+            if i in (0, 2, 3):
+                p.alignment = docx.enum.text.WD_ALIGN_PARAGRAPH.CENTER
+            for run in p.runs:
+                run.font.name = 'Bookman Old Style'
+                run.font.size = Pt(8.5)
+                
+    # Add Lampiran III (Daftar Pengganti)
+    doc.add_page_break()
+    p_lamp3_title = doc.add_paragraph()
+    p_lamp3_title.alignment = docx.enum.text.WD_ALIGN_PARAGRAPH.CENTER
+    r_l3 = p_lamp3_title.add_run(f"LAMPIRAN III BERITA ACARA NOMOR : {nomor_ba_verfal}\nDAFTAR CALON PENERIMA BANTUAN PENGGANTI\nBEDAH RUMAH TAHUN {tahun_anggaran}\nKABUPATEN {kab_name} PROVINSI {prov_name}")
+    r_l3.bold = True
+    r_l3.font.name = 'Bookman Old Style'
+    r_l3.font.size = Pt(11)
+    
+    table_l3 = doc.add_table(rows=1, cols=9)
+    table_l3.style = 'Table Grid'
+    hdr_cells3 = table_l3.rows[0].cells
+    hdr_titles3 = ["NO.", "NAMA (TIDAK LOLOS)", "NO. KTP", "DESA", "ALASAN TIDAK LOLOS", "NAMA PENGGANTI", "NO. KTP PENGGANTI", "DESA PENGGANTI", "KETERANGAN"]
+    for i, title in enumerate(hdr_titles3):
+        hdr_cells3[i].text = title
+        hdr_cells3[i].paragraphs[0].alignment = docx.enum.text.WD_ALIGN_PARAGRAPH.CENTER
+        for run in hdr_cells3[i].paragraphs[0].runs:
+            run.bold = True
+            run.font.name = 'Bookman Old Style'
+            run.font.size = Pt(9)
+            
+    for idx, r in enumerate(tidak_lolos_records):
+        row_cells = table_l3.add_row().cells
+        row_cells[0].text = str(idx + 1)
+        row_cells[1].text = r['nama'] or ""
+        row_cells[2].text = r['no_ktp'] or ""
+        row_cells[3].text = r['desa_kelurahan'] or ""
+        row_cells[4].text = r['alasan_tidak_lolos'] or ""
+        row_cells[5].text = r.get('nama_pengganti') or "-"
+        row_cells[6].text = r.get('no_ktp_pengganti') or "-"
+        row_cells[7].text = r.get('desa_kelurahan_pengganti') or (r['desa_kelurahan'] or "")
+        row_cells[8].text = r['keterangan'] or "-"
+        for i in range(9):
+            p = row_cells[i].paragraphs[0]
+            if i in (0, 2, 6):
+                p.alignment = docx.enum.text.WD_ALIGN_PARAGRAPH.CENTER
+            for run in p.runs:
+                run.font.name = 'Bookman Old Style'
+                run.font.size = Pt(8.5)
+
+    stream = io.BytesIO()
+    doc.save(stream)
+    docx_bytes = stream.getvalue()
+    stream.seek(0)
+    
+    clean_kab = kab_name.replace(' ', '_')
+    clean_batch = batch_name.replace(' ', '_')
+    filename = f"BA_VERFAL_{clean_kab}_{clean_batch}.docx"
+    return StreamingResponse(
+        stream,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+@app.post("/api/export/verfal/pdf")
+async def export_verfal_pdf(
+    batch_id: int = Form(...),
+    nomor_ba_verfal: str = Form(""),
+    tahun_anggaran: str = Form("2026"),
+    nomor_ba_versul: str = Form(""),
+    tanggal_ba_verfal: str = Form(""),
+    total_alokasi_versul: str = Form(""),
+    total_alokasi_invers: str = Form(""),
+    nama_pejabat_ketua_tim: str = Form(""),
+    nama_pejabat_kepala_balai: str = Form(""),
+    tanggal_terbit_ba_verfal: str = Form(""),
+    alasan_tidak_lolos_terbanyak: str = Form("")
+):
+    docx_resp = await export_verfal_docx(
+        batch_id, nomor_ba_verfal, tahun_anggaran, nomor_ba_versul,
+        tanggal_ba_verfal, total_alokasi_versul, total_alokasi_invers,
+        nama_pejabat_ketua_tim, nama_pejabat_kepala_balai,
+        tanggal_terbit_ba_verfal, alasan_tidak_lolos_terbanyak
+    )
+    
+    # Read bytes from docx_resp stream
+    docx_bytes = b""
+    if hasattr(docx_resp, 'body') and docx_resp.body:
+        docx_bytes = docx_resp.body
+    elif hasattr(docx_resp, 'body_iterator'):
+        if isinstance(docx_resp.body_iterator, io.BytesIO):
+            docx_bytes = docx_resp.body_iterator.getvalue()
+        elif isinstance(docx_resp.body_iterator, bytes):
+            docx_bytes = docx_resp.body_iterator
+        else:
+            chunks = []
+            async for chunk in docx_resp.body_iterator:
+                chunks.append(chunk)
+            docx_bytes = b"".join(chunks)
+            
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp_docx:
+        tmp_docx.write(docx_bytes)
+        tmp_docx_path = tmp_docx.name
+        
+    tmp_pdf_path = tmp_docx_path.replace(".docx", ".pdf")
+    try:
+        import subprocess
+        converted = False
+        try:
+            from docx2pdf import convert
+            convert(tmp_docx_path, tmp_pdf_path)
+            converted = os.path.exists(tmp_pdf_path)
+        except Exception:
+            pass
+            
+        if not converted:
+            try:
+                subprocess.run(["soffice", "--headless", "--convert-to", "pdf", "--outdir", os.path.dirname(tmp_docx_path), tmp_docx_path], check=True, timeout=30)
+                converted = os.path.exists(tmp_pdf_path)
+            except Exception:
+                pass
+                
+        if converted and os.path.exists(tmp_pdf_path):
+            with open(tmp_pdf_path, "rb") as f:
+                pdf_bytes = f.read()
+            os.remove(tmp_docx_path)
+            os.remove(tmp_pdf_path)
+            return StreamingResponse(
+                io.BytesIO(pdf_bytes),
+                media_type="application/pdf",
+                headers={"Content-Disposition": f"attachment; filename=BA_VERFAL_{batch_id}.pdf"}
+            )
+        else:
+            if os.path.exists(tmp_docx_path):
+                os.remove(tmp_docx_path)
+            return StreamingResponse(
+                io.BytesIO(docx_bytes),
+                media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                headers={"Content-Disposition": f"attachment; filename=BA_VERFAL_{batch_id}.docx"}
+            )
+    except Exception as e:
+        if os.path.exists(tmp_docx_path):
+            os.remove(tmp_docx_path)
+        return StreamingResponse(
+            io.BytesIO(docx_bytes),
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": f"attachment; filename=BA_VERFAL_{batch_id}.docx"}
+        )
+
+@app.get("/api/export/verfal/excel/{batch_id}")
+def export_verfal_excel(batch_id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT vb.*, s.name as stage_name, p.name as province_name
+        FROM verified_batches vb
+        JOIN invers_stages s ON vb.stage_id = s.id
+        LEFT JOIN provinces p ON s.province_id = p.id
+        WHERE vb.id = ?
+    """, (batch_id,))
+    batch = cursor.fetchone()
+    if not batch:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Batch Verfal tidak ditemukan")
+        
+    stage_id = batch['stage_id']
+    stage_name = batch['stage_name']
+    prov_name = batch['province_name'] or "SULAWESI SELATAN"
+    kab_name = (batch['kabupaten'] or "").upper().strip()
+    batch_name = batch['name']
+    
+    import json
+    meta = {}
+    if batch['metadata_json']:
+        try: meta = json.loads(batch['metadata_json'])
+        except Exception: pass
+    tahun_anggaran = meta.get("tahun_anggaran", "2026")
+    
+    cursor.execute("""
+        SELECT vr.*, re.nama_pengganti, re.jenis_kelamin_pengganti, re.no_ktp_pengganti,
+               re.no_kk_pengganti, re.alamat_pengganti, re.desa_kelurahan_pengganti,
+               re.kecamatan_pengganti, re.kabupaten_pengganti
+        FROM verified_records vr
+        LEFT JOIN replacement_events re ON re.disqualified_record_id = vr.id
+        WHERE vr.batch_id = ?
+        ORDER BY vr.no_urut ASC, vr.id ASC
+    """, (batch_id,))
+    records = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    
+    lolos_records = [r for r in records if r['status'] == 'LOLOS']
+    tidak_lolos_records = [r for r in records if r['status'] == 'TIDAK LOLOS']
+    
+    wb = openpyxl.Workbook()
+    
+    font_title = Font(name='Bookman Old Style', size=11, bold=True)
+    font_header = Font(name='Bookman Old Style', size=9, bold=True)
+    font_data = Font(name='Bookman Old Style', size=9)
+    
+    align_center = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    align_left = Alignment(horizontal='left', vertical='center')
+    border_thin = Border(
+        left=Side(style='thin', color='000000'),
+        right=Side(style='thin', color='000000'),
+        top=Side(style='thin', color='000000'),
+        bottom=Side(style='thin', color='000000')
+    )
+    
+    # 1. Sheet Lamp.IIA (Lolos & Pengganti Terurut per Desa)
+    ws_iia = wb.active
+    ws_iia.title = "Lamp.IIA"
+    
+    ws_iia['A2'] = "DAFTAR HASIL VERIFIKASI FAKTUAL CALON PENERIMA BANTUAN"
+    ws_iia['A2'].font = font_title
+    ws_iia['A3'] = f"BEDAH RUMAH TAHUN {tahun_anggaran}"
+    ws_iia['A3'].font = font_title
+    ws_iia['A4'] = f"PROVINSI {prov_name}"
+    ws_iia['A4'].font = font_title
+    
+    headers_iia_r6 = ["NO. URUT", "NAMA", "JENIS KELAMIN (L/P)", "NO.KK", "NO.KTP", "ALAMAT TEMPAT TINGGAL", "DESA / KELURAHAN", "KECAMATAN", "KABUPATEN / KOTA", "*) LOLOS / PENGGANTI", "INSTRUKSI VERIFIKASI", None, "KETERANGAN"]
+    for c_idx, h in enumerate(headers_iia_r6, 1):
+        if h:
+            cell = ws_iia.cell(row=6, column=c_idx, value=h)
+            cell.font = font_header
+            cell.alignment = align_center
+            cell.border = border_thin
+            if c_idx not in (11, 12):
+                ws_iia.merge_cells(start_row=6, start_column=c_idx, end_row=7, end_column=c_idx)
+    ws_iia.merge_cells(start_row=6, start_column=11, end_row=6, end_column=12)
+    
+    c_tahap = ws_iia.cell(row=7, column=11, value="TAHAP")
+    c_tahap.font = font_header
+    c_tahap.alignment = align_center
+    c_tahap.border = border_thin
+    
+    c_tgl = ws_iia.cell(row=7, column=12, value="TANGGAL")
+    c_tgl.font = font_header
+    c_tgl.alignment = align_center
+    c_tgl.border = border_thin
+    
+    for r in range(6, 8):
+        for c in range(1, 14):
+            ws_iia.cell(row=r, column=c).border = border_thin
+            
+    # Kumpulkan seluruh baris Lamp.IIA (Lolos + Pengganti dari Tidak Lolos)
+    iia_items = []
+    for rec in lolos_records:
+        iia_items.append({
+            'nama': rec['nama'],
+            'jenis_kelamin': rec['jenis_kelamin'],
+            'no_kk': rec['no_kk'],
+            'no_ktp': rec['no_ktp'],
+            'alamat': rec['alamat'],
+            'desa_kelurahan': rec['desa_kelurahan'] or '',
+            'kecamatan': rec['kecamatan'] or '',
+            'kabupaten_kota': rec['kabupaten_kota'] or kab_name,
+            'status_label': 'LOLOS',
+            'tahap': rec['tahap'] or stage_name,
+            'tanggal': rec['tanggal'] or batch.get('tanggal_ba') or '',
+            'keterangan': rec['keterangan'] or ''
+        })
+        
+    for rec in tidak_lolos_records:
+        nama_p = (rec.get('nama_pengganti') or '').strip()
+        if nama_p and nama_p != 'NONE':
+            iia_items.append({
+                'nama': nama_p,
+                'jenis_kelamin': rec.get('jenis_kelamin_pengganti') or '',
+                'no_kk': rec.get('no_kk_pengganti') or '',
+                'no_ktp': rec.get('no_ktp_pengganti') or '',
+                'alamat': rec.get('alamat_pengganti') or '',
+                'desa_kelurahan': rec.get('desa_kelurahan_pengganti') or rec.get('desa_kelurahan') or '',
+                'kecamatan': rec.get('kecamatan_pengganti') or rec.get('kecamatan') or '',
+                'kabupaten_kota': rec.get('kabupaten_pengganti') or rec.get('kabupaten_kota') or kab_name,
+                'status_label': 'PENGGANTI',
+                'tahap': rec['tahap'] or stage_name,
+                'tanggal': rec['tanggal'] or batch.get('tanggal_ba') or '',
+                'keterangan': f"Pengganti dari {rec['nama']}" if rec.get('nama') else (rec.get('keterangan') or '')
+            })
+            
+    # Urutkan berdasarkan Kecamatan, Desa/Kelurahan (agar berkumpul per desa), status ('LOLOS' lebih dulu baru 'PENGGANTI'), dan Nama
+    def iia_sort_key(item):
+        kec = (item['kecamatan'] or '').strip().upper()
+        desa = (item['desa_kelurahan'] or '').strip().upper()
+        st = 0 if item['status_label'] == 'LOLOS' else 1
+        nama = (item['nama'] or '').strip().upper()
+        return (kec, desa, st, nama)
+        
+    iia_items.sort(key=iia_sort_key)
+    
+    r_idx = 8
+    for idx, item in enumerate(iia_items, 1):
+        vals = [
+            idx,
+            item['nama'],
+            item['jenis_kelamin'],
+            item['no_kk'],
+            item['no_ktp'],
+            item['alamat'],
+            item['desa_kelurahan'],
+            item['kecamatan'],
+            item['kabupaten_kota'],
+            item['status_label'],
+            item['tahap'],
+            item['tanggal'],
+            item['keterangan']
+        ]
+        for c_idx, v in enumerate(vals, 1):
+            cell = ws_iia.cell(row=r_idx, column=c_idx, value=v)
+            cell.font = font_data
+            cell.border = border_thin
+            if c_idx in (1, 3, 4, 5, 10, 11, 12):
+                cell.alignment = align_center
+            else:
+                cell.alignment = align_left
+        r_idx += 1
+        
+    # 2. Sheet Lamp.IIIA (Daftar Tidak Lolos & Pengganti Lengkap dengan NO.KK Pengganti)
+    ws_iiia = wb.create_sheet("Lamp.IIIA")
+    ws_iiia['A2'] = "DAFTAR CALON PENGGANTI CALON PENERIMA BANTUAN"
+    ws_iiia['A2'].font = font_title
+    ws_iiia['A3'] = f"BEDAH RUMAH TAHUN {tahun_anggaran}"
+    ws_iiia['A3'].font = font_title
+    ws_iiia['A4'] = f"PROVINSI {prov_name}"
+    ws_iiia['A4'].font = font_title
+    
+    c_no = ws_iiia.cell(row=6, column=1, value="NO.")
+    c_no.font = font_header
+    c_no.alignment = align_center
+    ws_iiia.merge_cells(start_row=6, start_column=1, end_row=7, end_column=1)
+    
+    c_tl = ws_iiia.cell(row=6, column=2, value="TIDAK LOLOS")
+    c_tl.font = font_header
+    c_tl.alignment = align_center
+    ws_iiia.merge_cells(start_row=6, start_column=2, end_row=6, end_column=9)
+    
+    tl_sub = ["NAMA", "JENIS KELAMIN (L/P)", "NO.KTP", "ALAMAT TEMPAT TINGGAL", "DESA / KELURAHAN", "KECAMATAN", "KABUPATEN", "ALASAN TIDAK LOLOS *)"]
+    for i, sub in enumerate(tl_sub, 2):
+        cell = ws_iiia.cell(row=7, column=i, value=sub)
+        cell.font = font_header
+        cell.alignment = align_center
+        
+    c_sesudah = ws_iiia.cell(row=6, column=10, value="SEMUA")
+    c_sesudah.font = font_header
+    c_sesudah.alignment = align_center
+    ws_iiia.merge_cells(start_row=6, start_column=10, end_row=6, end_column=18)
+    
+    pg_sub = ["BNBA", "NAMA (PENGGANTI)", "JENIS KELAMIN (L/P)", "NO.KTP (PENGGANTI)", "NO.KK (PENGGANTI)", "ALAMAT TEMPAT TINGGAL", "DESA / KELURAHAN", "KECAMATAN", "KABUPATEN"]
+    for i, sub in enumerate(pg_sub, 10):
+        cell = ws_iiia.cell(row=7, column=i, value=sub)
+        cell.font = font_header
+        cell.alignment = align_center
+        
+    c_inst = ws_iiia.cell(row=6, column=19, value="INSTRUKSI VERIFIKASI")
+    c_inst.font = font_header
+    c_inst.alignment = align_center
+    ws_iiia.merge_cells(start_row=6, start_column=19, end_row=6, end_column=20)
+    
+    c_tahap3 = ws_iiia.cell(row=7, column=19, value="TAHAP")
+    c_tahap3.font = font_header
+    c_tahap3.alignment = align_center
+    
+    c_tgl3 = ws_iiia.cell(row=7, column=20, value="TANGGAL")
+    c_tgl3.font = font_header
+    c_tgl3.alignment = align_center
+    
+    c_ket3 = ws_iiia.cell(row=6, column=21, value="KETERANGAN")
+    c_ket3.font = font_header
+    c_ket3.alignment = align_center
+    ws_iiia.merge_cells(start_row=6, start_column=21, end_row=7, end_column=21)
+    
+    for r in range(6, 8):
+        for c in range(1, 22):
+            ws_iiia.cell(row=r, column=c).border = border_thin
+            
+    r_idx = 8
+    for idx, rec in enumerate(tidak_lolos_records, 1):
+        vals = [
+            idx,
+            rec['nama'],
+            rec['jenis_kelamin'],
+            rec['no_ktp'],
+            rec['alamat'],
+            rec['desa_kelurahan'],
+            rec['kecamatan'],
+            rec['kabupaten_kota'] or kab_name,
+            rec['alasan_tidak_lolos'],
+            "", # BNBA
+            rec.get('nama_pengganti') or "",
+            rec.get('jenis_kelamin_pengganti') or "",
+            rec.get('no_ktp_pengganti') or "",
+            rec.get('no_kk_pengganti') or "",
+            rec.get('alamat_pengganti') or "",
+            rec.get('desa_kelurahan_pengganti') or "",
+            rec.get('kecamatan_pengganti') or "",
+            rec.get('kabupaten_pengganti') or kab_name,
+            rec['tahap'] or stage_name,
+            rec['tanggal'] or batch.get('tanggal_ba') or "",
+            rec['keterangan'] or ""
+        ]
+        for c_idx, v in enumerate(vals, 1):
+            cell = ws_iiia.cell(row=r_idx, column=c_idx, value=v)
+            cell.font = font_data
+            cell.border = border_thin
+            if c_idx in (1, 3, 4, 9, 10, 12, 13, 14, 19, 20):
+                cell.alignment = align_center
+            else:
+                cell.alignment = align_left
+        r_idx += 1
+        
+    stream = io.BytesIO()
+    wb.save(stream)
+    stream.seek(0)
+    
+    clean_kab = kab_name.replace(' ', '_')
+    clean_batch = batch_name.replace(' ', '_')
+    filename = f"EXPORT_VERFAL_{clean_kab}_{clean_batch}.xlsx"
+    return StreamingResponse(
+        stream,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
 
 @app.post("/api/verified/records/bulk-delete")
 async def bulk_delete_verified_records(record_ids: str = Form(...)):
@@ -3123,7 +4344,7 @@ def export_rekap_keseluruhan(pengusul: str = ""):
             invers_recs = [dict(r) for r in cursor.fetchall()]
 
             verif_query = f"""
-                SELECT vr.no_ktp, vr.status, UPPER(TRIM(COALESCE(vr.kabupaten_kota, ''))) as kab
+                SELECT vr.no_ktp, vr.status, UPPER(TRIM(COALESCE(NULLIF(TRIM(vr.kabupaten_kota), ''), NULLIF(TRIM(vb.kabupaten), '')))) as kab
                 FROM verified_records vr
                 JOIN verified_batches vb ON vr.batch_id = vb.id
                 LEFT JOIN reconciliation_overrides ro ON ro.original_no_ktp = vr.no_ktp AND ro.stage_id = vb.stage_id
@@ -3146,7 +4367,7 @@ def export_rekap_keseluruhan(pengusul: str = ""):
             """, (stage_id,))
             invers_recs = [dict(r) for r in cursor.fetchall()]
             cursor.execute(f"""
-                SELECT vr.no_ktp, vr.status, UPPER(TRIM(COALESCE(vr.kabupaten_kota, ''))) as kab
+                SELECT vr.no_ktp, vr.status, UPPER(TRIM(COALESCE(NULLIF(TRIM(vr.kabupaten_kota), ''), NULLIF(TRIM(vb.kabupaten), '')))) as kab
                 FROM verified_records vr
                 JOIN verified_batches vb ON vr.batch_id = vb.id
                 LEFT JOIN reconciliation_overrides ro ON ro.original_no_ktp = vr.no_ktp AND ro.stage_id = vb.stage_id
@@ -3527,12 +4748,12 @@ def get_rekap_keseluruhan(published_only: int = 0, pengusul: str = "", province_
         JOIN invers_stages s ON irv.stage_id = s.id
         {prov_stage_sql} AND irv.is_active = 1 AND TRIM(COALESCE(ir.kabupaten_kota, '')) != ''
         UNION
-        SELECT DISTINCT UPPER(TRIM(COALESCE(vr.kabupaten_kota, ''))) as kab
+        SELECT DISTINCT UPPER(TRIM(COALESCE(NULLIF(TRIM(vr.kabupaten_kota), ''), NULLIF(TRIM(vb.kabupaten), '')))) as kab
         FROM verified_records vr
         JOIN verified_batches vb ON vr.batch_id = vb.id
         JOIN invers_stages s ON vb.stage_id = s.id
         LEFT JOIN reconciliation_overrides ro ON ro.original_no_ktp = vr.no_ktp AND ro.stage_id = vb.stage_id
-        {prov_stage_sql} AND (vr.is_duplicate_in_previous = 0 OR ro.id IS NOT NULL) AND TRIM(COALESCE(vr.kabupaten_kota, '')) != ''
+        {prov_stage_sql} AND (vr.is_duplicate_in_previous = 0 OR ro.id IS NOT NULL) AND TRIM(COALESCE(NULLIF(TRIM(vr.kabupaten_kota), ''), NULLIF(TRIM(vb.kabupaten), ''))) != ''
         {published_filter}
         ORDER BY kab ASC
     """, (*prov_stage_params, *prov_stage_params))
@@ -3548,10 +4769,11 @@ def get_rekap_keseluruhan(published_only: int = 0, pengusul: str = "", province_
     cursor.execute(f"""
         SELECT 
             m.verified_stage_id as stage_id,
-            UPPER(TRIM(COALESCE(vr.kabupaten_kota, ''))) as kab,
+            UPPER(TRIM(COALESCE(NULLIF(TRIM(vr.kabupaten_kota), ''), NULLIF(TRIM(vb.kabupaten), '')))) as kab,
             COUNT(*) as cnt
         FROM sk_dirjen_matches m
         JOIN verified_records vr ON vr.id = m.verified_record_id
+        JOIN verified_batches vb ON vr.batch_id = vb.id
         LEFT JOIN (
             SELECT DISTINCT no_ktp, pengusul FROM invers_records
             WHERE pengusul IS NOT NULL AND pengusul != ''
@@ -3601,7 +4823,7 @@ def get_rekap_keseluruhan(published_only: int = 0, pengusul: str = "", province_
         verif_where = f"AND UPPER(COALESCE(ir_p.pengusul, '')) IN ({ph})"
         verif_params = tuple(p.upper() for p in pengusul_list)
     cursor.execute(f"""
-        SELECT vb.stage_id, UPPER(TRIM(COALESCE(vr.kabupaten_kota, ''))) as kab, vr.status, COUNT(*) as cnt
+        SELECT vb.stage_id, UPPER(TRIM(COALESCE(NULLIF(TRIM(vr.kabupaten_kota), ''), NULLIF(TRIM(vb.kabupaten), '')))) as kab, vr.status, COUNT(*) as cnt
         FROM verified_records vr
         JOIN verified_batches vb ON vr.batch_id = vb.id
         LEFT JOIN reconciliation_overrides ro ON ro.original_no_ktp = vr.no_ktp AND ro.stage_id = vb.stage_id
@@ -3609,7 +4831,7 @@ def get_rekap_keseluruhan(published_only: int = 0, pengusul: str = "", province_
             SELECT DISTINCT no_ktp, pengusul FROM invers_records
             WHERE pengusul IS NOT NULL AND pengusul != ''
         ) ir_p ON ir_p.no_ktp = vr.no_ktp
-        WHERE (vr.is_duplicate_in_previous = 0 OR ro.id IS NOT NULL) AND TRIM(COALESCE(vr.kabupaten_kota, '')) != ''
+        WHERE (vr.is_duplicate_in_previous = 0 OR ro.id IS NOT NULL) AND TRIM(COALESCE(NULLIF(TRIM(vr.kabupaten_kota), ''), NULLIF(TRIM(vb.kabupaten), ''))) != ''
         {verif_where}
         {published_filter}
         GROUP BY vb.stage_id, kab, vr.status
@@ -4213,6 +5435,537 @@ def export_rekap_batch_ba(published_only: int = 1):
     file_stream.seek(0)
     
     filename = "REKAP_BATCH_BERITA_ACARA.xlsx"
+    return StreamingResponse(
+        file_stream,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+@app.get("/api/rekap-batch-verfal")
+def get_rekap_batch_verfal(published_only: int = 1, province_id: int = 1):
+    import re
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    if not province_id or province_id == 1:
+        prov_stage_sql = "WHERE (s.province_id = 1 OR s.province_id IS NULL OR s.province_id = 0)"
+        prov_stage_params = ()
+    else:
+        prov_stage_sql = "WHERE s.province_id = ?"
+        prov_stage_params = (province_id,)
+
+    cursor.execute(f"SELECT s.id, s.name FROM invers_stages s {prov_stage_sql} ORDER BY s.id ASC", prov_stage_params)
+    all_stages = [dict(r) for r in cursor.fetchall()]
+    def get_stage_num(s):
+        match = re.search(r'\d+', s['name'])
+        return int(match.group()) if match else 999
+    all_stages = sorted(all_stages, key=get_stage_num)
+    
+    published_filter = "AND vb.is_published = 1" if published_only else ""
+    cursor.execute(f"""
+        SELECT DISTINCT UPPER(TRIM(COALESCE(ir.kabupaten_kota, ''))) as kab 
+        FROM invers_records ir
+        JOIN invers_revisions irv ON ir.revision_id = irv.id
+        JOIN invers_stages s ON irv.stage_id = s.id
+        {prov_stage_sql} AND irv.is_active = 1 AND TRIM(COALESCE(ir.kabupaten_kota, '')) != ''
+        UNION
+        SELECT DISTINCT UPPER(TRIM(COALESCE(vr.kabupaten_kota, ''))) as kab
+        FROM verified_records vr
+        JOIN verified_batches vb ON vr.batch_id = vb.id
+        JOIN invers_stages s ON vb.stage_id = s.id
+        LEFT JOIN reconciliation_overrides ro ON ro.original_no_ktp = vr.no_ktp AND ro.stage_id = vb.stage_id
+        {prov_stage_sql} AND vb.batch_type = 'VERFAL' AND (vr.is_duplicate_in_previous = 0 OR ro.id IS NOT NULL) AND TRIM(COALESCE(vr.kabupaten_kota, '')) != ''
+        {published_filter}
+        ORDER BY kab ASC
+    """, (*prov_stage_params, *prov_stage_params))
+    all_kabupaten = [r['kab'] for r in cursor.fetchall()]
+    
+    stage_batch_filter = "AND is_published = 1" if published_only else ""
+    stages_data = []
+    
+    for stage in all_stages:
+        stage_id = stage['id']
+        stage_name = stage['name']
+        
+        cursor.execute(f"""
+            SELECT id, name, is_published, nomor_ba, tanggal_ba, sort_order, kabupaten 
+            FROM verified_batches 
+            WHERE stage_id = ? AND batch_type = 'VERFAL' {stage_batch_filter}
+            ORDER BY sort_order ASC, uploaded_at ASC, id ASC
+        """, (stage_id,))
+        batches = [dict(r) for r in cursor.fetchall()]
+        
+        if not batches:
+            continue
+            
+        batches_data = []
+        for batch in batches:
+            batch_id = batch['id']
+            batch_name = batch['name']
+            
+            cursor.execute("""
+                SELECT UPPER(TRIM(COALESCE(vr.kabupaten_kota, ''))) as kab,
+                       SUM(CASE WHEN vr.status = 'LOLOS' THEN 1 ELSE 0 END) as lolos,
+                       SUM(CASE WHEN vr.status = 'TIDAK LOLOS' THEN 1 ELSE 0 END) as tidak_lolos,
+                       SUM(CASE WHEN vr.status = 'LOLOS' AND sk.verified_record_id IS NOT NULL THEN 1 ELSE 0 END) as sk_sudah
+                FROM verified_records vr
+                LEFT JOIN (
+                    SELECT DISTINCT verified_record_id 
+                    FROM sk_dirjen_matches 
+                    WHERE verified_record_id IS NOT NULL
+                      AND (match_type = 'PERFECT' 
+                           OR (match_type = 'NEEDS_APPROVAL' AND override_status = 'APPROVED')
+                           OR match_type = 'MANUAL_PAIR')
+                ) sk ON sk.verified_record_id = vr.id
+                WHERE vr.batch_id = ? AND TRIM(COALESCE(vr.kabupaten_kota, '')) != ''
+                GROUP BY kab
+            """, (batch_id,))
+            
+            stats_by_kab = {}
+            for row in cursor.fetchall():
+                lolos = row['lolos']
+                tidak_lolos = row['tidak_lolos']
+                sk_sudah = row['sk_sudah']
+                sk_belum = max(0, lolos - sk_sudah)
+                stats_by_kab[row['kab']] = {
+                    "lolos": lolos,
+                    "tidak_lolos": tidak_lolos,
+                    "verifikasi": lolos + tidak_lolos,
+                    "sk_sudah": sk_sudah,
+                    "sk_belum": sk_belum
+                }
+            
+            kab_data = []
+            total_verifikasi = 0
+            total_lolos = 0
+            total_tidak_lolos = 0
+            total_sk_sudah = 0
+            total_sk_belum = 0
+            
+            for kab in all_kabupaten:
+                stats = stats_by_kab.get(kab, {"lolos": 0, "tidak_lolos": 0, "verifikasi": 0, "sk_sudah": 0, "sk_belum": 0})
+                kab_data.append({
+                    "kabupaten": kab,
+                    "verifikasi": stats["verifikasi"],
+                    "lolos": stats["lolos"],
+                    "tidak_lolos": stats["tidak_lolos"],
+                    "sk_sudah": stats["sk_sudah"],
+                    "sk_belum": stats["sk_belum"]
+                })
+                total_verifikasi += stats["verifikasi"]
+                total_lolos += stats["lolos"]
+                total_tidak_lolos += stats["tidak_lolos"]
+                total_sk_sudah += stats["sk_sudah"]
+                total_sk_belum += stats["sk_belum"]
+                
+            batches_data.append({
+                "batch_id": batch_id,
+                "batch_name": batch_name,
+                "kabupaten": batch.get("kabupaten"),
+                "is_published": batch["is_published"],
+                "nomor_ba": batch.get("nomor_ba"),
+                "tanggal_ba": batch.get("tanggal_ba"),
+                "kabupaten_data": kab_data,
+                "totals": {
+                    "verifikasi": total_verifikasi,
+                    "lolos": total_lolos,
+                    "tidak_lolos": total_tidak_lolos,
+                    "sk_sudah": total_sk_sudah,
+                    "sk_belum": total_sk_belum
+                }
+            })
+            
+        stage_type = "pengganti" if "pengganti" in stage_name.lower() else "murni"
+        stages_data.append({
+            "stage_id": stage_id,
+            "stage_name": stage_name,
+            "stage_type": stage_type,
+            "batches": batches_data
+        })
+        
+    conn.close()
+    return {
+        "all_kabupaten": all_kabupaten,
+        "stages": stages_data
+    }
+
+@app.get("/api/rekap-batch-verfal/export")
+def export_rekap_batch_verfal(published_only: int = 1):
+    import re
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT id, name FROM invers_stages ORDER BY id ASC")
+    all_stages = [dict(r) for r in cursor.fetchall()]
+    def get_stage_num(s):
+        match = re.search(r'\d+', s['name'])
+        return int(match.group()) if match else 999
+    all_stages = sorted(all_stages, key=get_stage_num)
+    
+    published_filter = "AND vb.is_published = 1" if published_only else ""
+    cursor.execute(f"""
+        SELECT DISTINCT UPPER(TRIM(COALESCE(kabupaten_kota, ''))) as kab 
+        FROM invers_records ir
+        JOIN invers_revisions irv ON ir.revision_id = irv.id
+        WHERE irv.is_active = 1 AND TRIM(COALESCE(kabupaten_kota, '')) != ''
+        UNION
+        SELECT DISTINCT UPPER(TRIM(COALESCE(vr.kabupaten_kota, ''))) as kab
+        FROM verified_records vr
+        JOIN verified_batches vb ON vr.batch_id = vb.id
+        LEFT JOIN reconciliation_overrides ro ON ro.original_no_ktp = vr.no_ktp AND ro.stage_id = vb.stage_id
+        WHERE vb.batch_type = 'VERFAL' AND (vr.is_duplicate_in_previous = 0 OR ro.id IS NOT NULL) AND TRIM(COALESCE(vr.kabupaten_kota, '')) != ''
+        {published_filter}
+        ORDER BY kab ASC
+    """)
+    all_kabupaten = [r['kab'] for r in cursor.fetchall()]
+    
+    stage_batch_filter = "AND is_published = 1" if published_only else ""
+    stages_data = []
+    
+    for stage in all_stages:
+        stage_id = stage['id']
+        stage_name = stage['name']
+        
+        cursor.execute(f"""
+            SELECT id, name, nomor_ba, tanggal_ba, kabupaten 
+            FROM verified_batches 
+            WHERE stage_id = ? AND batch_type = 'VERFAL' {stage_batch_filter}
+            ORDER BY sort_order ASC, uploaded_at ASC, id ASC
+        """, (stage_id,))
+        batches = [dict(r) for r in cursor.fetchall()]
+        
+        if not batches:
+            continue
+            
+        batches_data = []
+        for batch in batches:
+            batch_id = batch['id']
+            batch_name = batch['name']
+            
+            cursor.execute("""
+                SELECT UPPER(TRIM(COALESCE(vr.kabupaten_kota, ''))) as kab,
+                       SUM(CASE WHEN vr.status = 'LOLOS' THEN 1 ELSE 0 END) as lolos,
+                       SUM(CASE WHEN vr.status = 'TIDAK LOLOS' THEN 1 ELSE 0 END) as tidak_lolos,
+                       SUM(CASE WHEN vr.status = 'LOLOS' AND sk.verified_record_id IS NOT NULL THEN 1 ELSE 0 END) as sk_sudah
+                FROM verified_records vr
+                LEFT JOIN (
+                    SELECT DISTINCT verified_record_id 
+                    FROM sk_dirjen_matches 
+                    WHERE verified_record_id IS NOT NULL
+                      AND (match_type = 'PERFECT' 
+                           OR (match_type = 'NEEDS_APPROVAL' AND override_status = 'APPROVED')
+                           OR match_type = 'MANUAL_PAIR')
+                ) sk ON sk.verified_record_id = vr.id
+                WHERE vr.batch_id = ? AND TRIM(COALESCE(vr.kabupaten_kota, '')) != ''
+                GROUP BY kab
+            """, (batch_id,))
+            
+            stats_by_kab = {}
+            for row in cursor.fetchall():
+                lolos = row['lolos']
+                tidak_lolos = row['tidak_lolos']
+                sk_sudah = row['sk_sudah']
+                sk_belum = max(0, lolos - sk_sudah)
+                stats_by_kab[row['kab']] = {
+                    "lolos": lolos,
+                    "tidak_lolos": tidak_lolos,
+                    "verifikasi": lolos + tidak_lolos,
+                    "sk_sudah": sk_sudah,
+                    "sk_belum": sk_belum
+                }
+            
+            kab_data = {}
+            total_verifikasi = 0
+            total_lolos = 0
+            total_tidak_lolos = 0
+            total_sk_sudah = 0
+            total_sk_belum = 0
+            
+            for kab in all_kabupaten:
+                stats = stats_by_kab.get(kab, {"lolos": 0, "tidak_lolos": 0, "verifikasi": 0, "sk_sudah": 0, "sk_belum": 0})
+                kab_data[kab] = stats
+                total_verifikasi += stats["verifikasi"]
+                total_lolos += stats["lolos"]
+                total_tidak_lolos += stats["tidak_lolos"]
+                total_sk_sudah += stats["sk_sudah"]
+                total_sk_belum += stats["sk_belum"]
+                
+            batches_data.append({
+                "batch_id": batch_id,
+                "batch_name": batch_name,
+                "kabupaten": batch.get("kabupaten"),
+                "nomor_ba": batch.get("nomor_ba"),
+                "tanggal_ba": batch.get("tanggal_ba"),
+                "kabupaten_data": kab_data,
+                "totals": {
+                    "verifikasi": total_verifikasi,
+                    "lolos": total_lolos,
+                    "tidak_lolos": total_tidak_lolos,
+                    "sk_sudah": total_sk_sudah,
+                    "sk_belum": total_sk_belum
+                }
+            })
+            
+        stage_type = "pengganti" if "pengganti" in stage_name.lower() else "murni"
+        stages_data.append({
+            "stage_id": stage_id,
+            "stage_name": stage_name,
+            "stage_type": stage_type,
+            "batches": batches_data
+        })
+        
+    conn.close()
+    
+    wb = openpyxl.Workbook()
+    
+    font_main_title = Font(name='Arial', size=14, bold=True, color='1E293B')
+    font_sub_title = Font(name='Arial', size=10, italic=True, color='64748B')
+    font_stage_header = Font(name='Arial', size=11, bold=True, color='FFFFFF')
+    font_batch_header = Font(name='Arial', size=10, bold=True, color='1E293B')
+    font_sub_header = Font(name='Arial', size=9, bold=True, color='475569')
+    font_sub_header_sk_sudah = Font(name='Arial', size=9, bold=True, color='047857')
+    font_sub_header_sk_belum = Font(name='Arial', size=9, bold=True, color='B45309')
+    font_data = Font(name='Arial', size=9, color='000000')
+    font_total = Font(name='Arial', size=9, bold=True, color='000000')
+    font_lolos_cell = Font(name='Arial', size=9, color='15803D', bold=True)
+    font_tidak_lolos_cell = Font(name='Arial', size=9, color='DC2626', bold=True)
+    font_sk_sudah_cell = Font(name='Arial', size=9, color='047857', bold=True)
+    font_sk_belum_cell = Font(name='Arial', size=9, color='B45309', bold=True)
+    
+    fill_stage = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
+    fill_batch = PatternFill(start_color="E2E8F0", end_color="E2E8F0", fill_type="solid")
+    fill_sub_v = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
+    fill_sub_l = PatternFill(start_color="DCFCE7", end_color="DCFCE7", fill_type="solid")
+    fill_sub_tl = PatternFill(start_color="FEE2E2", end_color="FEE2E2", fill_type="solid")
+    fill_sub_sk_sudah = PatternFill(start_color="D1FAE5", end_color="D1FAE5", fill_type="solid")
+    fill_sub_sk_belum = PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid")
+    
+    fill_row_even = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
+    fill_total_row = PatternFill(start_color="E2E8F0", end_color="E2E8F0", fill_type="solid")
+    fill_lolos_cell = PatternFill(start_color="F0FDF4", end_color="F0FDF4", fill_type="solid")
+    fill_tidak_lolos_cell = PatternFill(start_color="FEF2F2", end_color="FEF2F2", fill_type="solid")
+    fill_sk_sudah_cell = PatternFill(start_color="ECFDF5", end_color="ECFDF5", fill_type="solid")
+    fill_sk_belum_cell = PatternFill(start_color="FFFBEB", end_color="FFFBEB", fill_type="solid")
+    
+    border_thin = Border(
+        left=Side(style='thin', color='CBD5E1'),
+        right=Side(style='thin', color='CBD5E1'),
+        top=Side(style='thin', color='CBD5E1'),
+        bottom=Side(style='thin', color='CBD5E1')
+    )
+    border_double_top = Border(
+        left=Side(style='thin', color='CBD5E1'),
+        right=Side(style='thin', color='CBD5E1'),
+        top=Side(style='double', color='000000'),
+        bottom=Side(style='double', color='000000')
+    )
+    
+    align_center = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    align_left = Alignment(horizontal='left', vertical='center')
+    align_title = Alignment(horizontal='left', vertical='center')
+    
+    ws = wb.active
+    ws.title = "Rekap BA Verfal"
+    
+    ws['A1'] = "REKAPITULASI BATCH BERITA ACARA VERIFIKASI FAKTUAL (VERFAL)"
+    ws['A1'].font = font_main_title
+    ws['A1'].alignment = align_title
+    
+    ws['A2'] = "Sistem Verifikasi Perumahan Swadaya — Laporan per Batch Verfal"
+    ws['A2'].font = font_sub_title
+    ws['A2'].alignment = align_title
+    
+    ws.cell(row=4, column=1, value="NO").font = font_stage_header
+    ws.cell(row=4, column=1).alignment = align_center
+    ws.cell(row=4, column=1).fill = fill_stage
+    ws.cell(row=4, column=1).border = border_thin
+    ws.merge_cells('A4:A6')
+    
+    ws.cell(row=4, column=2, value="KABUPATEN / KOTA").font = font_stage_header
+    ws.cell(row=4, column=2).alignment = align_center
+    ws.cell(row=4, column=2).fill = fill_stage
+    ws.cell(row=4, column=2).border = border_thin
+    ws.merge_cells('B4:B6')
+    
+    col_idx = 3
+    for stage in stages_data:
+        stage_batches = stage['batches']
+        if not stage_batches:
+            continue
+        num_cols = len(stage_batches) * 5
+        start_col = col_idx
+        end_col = col_idx + num_cols - 1
+        
+        cell_stage = ws.cell(row=4, column=start_col, value=stage['stage_name'].upper())
+        cell_stage.font = font_stage_header
+        cell_stage.alignment = align_center
+        cell_stage.fill = fill_stage
+        
+        for c in range(start_col, end_col + 1):
+            ws.cell(row=4, column=c).border = border_thin
+            ws.cell(row=4, column=c).fill = fill_stage
+        if num_cols > 1:
+            ws.merge_cells(start_row=4, start_column=start_col, end_row=4, end_column=end_col)
+            
+        for batch in stage_batches:
+            b_start = col_idx
+            b_end = col_idx + 4
+            
+            b_label = batch['batch_name']
+            if batch.get('kabupaten'):
+                b_label = f"{b_label} ({batch['kabupaten']})"
+            if batch.get('nomor_ba'):
+                b_label += f"\nNo: {batch['nomor_ba']}"
+            if batch.get('tanggal_ba'):
+                b_label += f"\nTgl: {batch['tanggal_ba']}"
+                
+            cell_batch = ws.cell(row=5, column=b_start, value=b_label)
+            cell_batch.font = font_batch_header
+            cell_batch.alignment = align_center
+            cell_batch.fill = fill_batch
+            
+            for c in range(b_start, b_end + 1):
+                ws.cell(row=5, column=c).border = border_thin
+                ws.cell(row=5, column=c).fill = fill_batch
+            ws.merge_cells(start_row=5, start_column=b_start, end_row=5, end_column=b_end)
+            
+            c_v = ws.cell(row=6, column=b_start, value="VERIFIKASI")
+            c_l = ws.cell(row=6, column=b_start + 1, value="LOLOS")
+            c_tl = ws.cell(row=6, column=b_start + 2, value="TIDAK LOLOS")
+            c_sks = ws.cell(row=6, column=b_start + 3, value="SUDAH SK")
+            c_skb = ws.cell(row=6, column=b_start + 4, value="BELUM SK")
+            
+            for c_sub, f_sub, fill_s in [
+                (c_v, font_sub_header, fill_sub_v), 
+                (c_l, font_sub_header, fill_sub_l), 
+                (c_tl, font_sub_header, fill_sub_tl),
+                (c_sks, font_sub_header_sk_sudah, fill_sub_sk_sudah),
+                (c_skb, font_sub_header_sk_belum, fill_sub_sk_belum)
+            ]:
+                c_sub.font = f_sub
+                c_sub.alignment = align_center
+                c_sub.fill = fill_s
+                c_sub.border = border_thin
+                
+            col_idx += 5
+            
+    row_idx = 7
+    for k_idx, kab in enumerate(all_kabupaten, 1):
+        is_even = (k_idx % 2 == 0)
+        row_fill = fill_row_even if is_even else PatternFill(fill_type=None)
+        
+        cell_no = ws.cell(row=row_idx, column=1, value=k_idx)
+        cell_no.font = font_data
+        cell_no.alignment = align_center
+        cell_no.border = border_thin
+        if is_even: cell_no.fill = row_fill
+        
+        cell_kab = ws.cell(row=row_idx, column=2, value=kab)
+        cell_kab.font = font_data
+        cell_kab.alignment = align_left
+        cell_kab.border = border_thin
+        if is_even: cell_kab.fill = row_fill
+        
+        c_idx = 3
+        for stage in stages_data:
+            for batch in stage['batches']:
+                stats = batch['kabupaten_data'].get(kab, {"verifikasi": 0, "lolos": 0, "tidak_lolos": 0, "sk_sudah": 0, "sk_belum": 0})
+                val_v = stats['verifikasi']
+                val_l = stats['lolos']
+                val_tl = stats['tidak_lolos']
+                val_sks = stats['sk_sudah']
+                val_skb = stats['sk_belum']
+                
+                cell_v = ws.cell(row=row_idx, column=c_idx, value=val_v if val_v > 0 else "-")
+                cell_l = ws.cell(row=row_idx, column=c_idx + 1, value=val_l if val_l > 0 else "-")
+                cell_tl = ws.cell(row=row_idx, column=c_idx + 2, value=val_tl if val_tl > 0 else "-")
+                cell_sks = ws.cell(row=row_idx, column=c_idx + 3, value=val_sks if val_sks > 0 else "-")
+                cell_skb = ws.cell(row=row_idx, column=c_idx + 4, value=val_skb if val_skb > 0 else "-")
+                
+                for cell in (cell_v, cell_l, cell_tl, cell_sks, cell_skb):
+                    cell.alignment = align_center
+                    if is_even: cell.fill = row_fill
+                    
+                cell_v.font = font_data
+                cell_l.font = font_lolos_cell if val_l > 0 else font_data
+                cell_tl.font = font_tidak_lolos_cell if val_tl > 0 else font_data
+                cell_sks.font = font_sk_sudah_cell if val_sks > 0 else font_data
+                cell_skb.font = font_sk_belum_cell if val_skb > 0 else font_data
+                
+                if val_l > 0: cell_l.fill = fill_lolos_cell
+                if val_tl > 0: cell_tl.fill = fill_tidak_lolos_cell
+                if val_sks > 0: cell_sks.fill = fill_sk_sudah_cell
+                if val_skb > 0: cell_skb.fill = fill_sk_belum_cell
+                    
+                cell_v.border = border_thin
+                cell_l.border = border_thin
+                cell_tl.border = border_thin
+                cell_sks.border = border_thin
+                cell_skb.border = border_thin
+                c_idx += 5
+        row_idx += 1
+        
+    cell_tot_label = ws.cell(row=row_idx, column=2, value="TOTAL")
+    cell_tot_label.font = font_total
+    cell_tot_label.alignment = align_left
+    cell_tot_label.fill = fill_total_row
+    cell_tot_label.border = border_double_top
+    
+    cell_tot_no = ws.cell(row=row_idx, column=1)
+    cell_tot_no.fill = fill_total_row
+    cell_tot_no.border = border_double_top
+    
+    c_idx = 3
+    for stage in stages_data:
+        for batch in stage['batches']:
+            t = batch['totals']
+            cell_tot_v = ws.cell(row=row_idx, column=c_idx, value=t['verifikasi'])
+            cell_tot_l = ws.cell(row=row_idx, column=c_idx + 1, value=t['lolos'])
+            cell_tot_tl = ws.cell(row=row_idx, column=c_idx + 2, value=t['tidak_lolos'])
+            cell_tot_sks = ws.cell(row=row_idx, column=c_idx + 3, value=t['sk_sudah'])
+            cell_tot_skb = ws.cell(row=row_idx, column=c_idx + 4, value=t['sk_belum'])
+            
+            cell_tot_v.font = font_total
+            cell_tot_l.font = font_total
+            cell_tot_tl.font = font_total
+            cell_tot_sks.font = font_total
+            cell_tot_skb.font = font_total
+            
+            cell_tot_v.alignment = align_center
+            cell_tot_l.alignment = align_center
+            cell_tot_tl.alignment = align_center
+            cell_tot_sks.alignment = align_center
+            cell_tot_skb.alignment = align_center
+            
+            cell_tot_v.fill = fill_total_row
+            cell_tot_l.fill = fill_total_row
+            cell_tot_tl.fill = fill_total_row
+            cell_tot_sks.fill = fill_total_row
+            cell_tot_skb.fill = fill_total_row
+            
+            cell_tot_v.border = border_double_top
+            cell_tot_l.border = border_double_top
+            cell_tot_tl.border = border_double_top
+            cell_tot_sks.border = border_double_top
+            cell_tot_skb.border = border_double_top
+            c_idx += 5
+            
+    for col in ws.columns:
+        col_idx = col[0].column
+        col_letter = get_column_letter(col_idx)
+        if col_idx == 1:
+            ws.column_dimensions[col_letter].width = 6
+        elif col_idx == 2:
+            ws.column_dimensions[col_letter].width = 28
+        else:
+            ws.column_dimensions[col_letter].width = 14
+    ws.freeze_panes = 'C7'
+    
+    file_stream = io.BytesIO()
+    wb.save(file_stream)
+    file_stream.seek(0)
+    
+    filename = "REKAP_BATCH_VERFAL.xlsx"
     return StreamingResponse(
         file_stream,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
