@@ -940,6 +940,39 @@ function App() {
   const [showAddProvinceModal, setShowAddProvinceModal] = useState(false);
   const [newProvinceNameInput, setNewProvinceNameInput] = useState('');
   const [addProvinceLoading, setAddProvinceLoading] = useState(false);
+  const [isExportingStageVerfal, setIsExportingStageVerfal] = useState(false);
+
+  const handleExportStageVerfalExcel = async () => {
+    if (!selectedStageId) {
+      showToast("Pilih tahap kegiatan terlebih dahulu", "error");
+      return;
+    }
+    setIsExportingStageVerfal(true);
+    showToast("Mempersiapkan berkas Excel seluruh kabupaten...", "info");
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/export/verfal/stage-excel/${selectedStageId}`);
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || "Gagal mengekspor data Excel seluruh kabupaten");
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const stageObj = stages.find(s => s.id.toString() === selectedStageId.toString());
+      const stageName = (stageObj?.name || 'Tahap').replace(/\s+/g, '_');
+      a.download = `VERFAL_GABUNGAN_${stageName}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      showToast("Berkas Excel seluruh kabupaten berhasil diunduh!", "success");
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      setIsExportingStageVerfal(false);
+    }
+  };
 
   const fetchProvinces = useCallback(async () => {
     try {
@@ -4395,7 +4428,26 @@ function App() {
                     Daftar Berita Acara Verifikasi Faktual yang dikelompokkan berdasarkan Kabupaten/Kota di {stages.find(s => s.id.toString() === selectedStageId)?.name || 'Tahap Aktif'}.
                   </p>
                 </div>
-                <div style={{ display: 'flex', gap: '10px' }}>
+                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={handleExportStageVerfalExcel}
+                    disabled={isExportingStageVerfal}
+                    style={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: '6px', 
+                      fontWeight: 600,
+                      color: 'var(--primary)',
+                      borderColor: 'var(--primary)',
+                      background: 'rgba(26, 60, 64, 0.05)'
+                    }}
+                    title="Ekspor seluruh hasil verifikasi faktual dari semua kabupaten pada tahap ini ke dalam satu berkas Excel"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                    {isExportingStageVerfal ? 'Mengekspor...' : 'Ekspor Excel Seluruh Kabupaten'}
+                  </button>
                   <a
                     href={`${BACKEND_URL}/api/templates/download/verfal`}
                     download="TEMPLATE_VERFAL.xlsx"

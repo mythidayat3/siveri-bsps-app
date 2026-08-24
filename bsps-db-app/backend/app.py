@@ -3624,6 +3624,383 @@ def export_verfal_excel(batch_id: int):
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
 
+@app.get("/api/export/verfal/stage-excel/{stage_id}")
+def export_stage_verfal_excel(stage_id: int):
+    """
+    Ekspor berkas Excel gabungan untuk seluruh kabupaten yang memiliki data verifikasi faktual pada tahap aktif.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT s.name as stage_name, p.name as province_name
+        FROM invers_stages s
+        LEFT JOIN provinces p ON s.province_id = p.id
+        WHERE s.id = ?
+    """, (stage_id,))
+    stage_row = cursor.fetchone()
+    if not stage_row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Tahap tidak ditemukan")
+        
+    stage_name = stage_row['stage_name']
+    prov_name_raw = stage_row['province_name'] or "SULAWESI SELATAN"
+    prov_name = clean_province_for_export(prov_name_raw)
+    
+    cursor.execute("""
+        SELECT vr.*, re.nama_pengganti, re.jenis_kelamin_pengganti, re.no_ktp_pengganti,
+               re.no_kk_pengganti, re.alamat_pengganti, re.desa_kelurahan_pengganti,
+               re.kecamatan_pengganti, re.kabupaten_pengganti, vb.metadata_json, vb.tanggal_ba,
+               vb.name as batch_name
+        FROM verified_records vr
+        JOIN verified_batches vb ON vr.batch_id = vb.id
+        LEFT JOIN replacement_events re ON re.disqualified_record_id = vr.id
+        WHERE vb.stage_id = ?
+        ORDER BY vr.kabupaten_kota ASC, vr.kecamatan ASC, vr.desa_kelurahan ASC, vr.no_urut ASC, vr.id ASC
+    """, (stage_id,))
+    records = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    
+    if not records:
+        raise HTTPException(status_code=400, detail="Belum ada data verifikasi faktual pada tahap ini")
+        
+    lolos_records = [r for r in records if r['status'] == 'LOLOS']
+    tidak_lolos_records = [r for r in records if r['status'] == 'TIDAK LOLOS']
+    
+    template_candidates = [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates", "EXPORT_VERFAL.xlsx"),
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "EXPORT_VERFAL.xlsx"),
+        os.path.join(BASE_DIR, "EXPORT_VERFAL.xlsx"),
+        os.path.join(os.getcwd(), "backend", "templates", "EXPORT_VERFAL.xlsx"),
+        os.path.join(os.getcwd(), "EXPORT_VERFAL.xlsx")
+    ]
+    template_path = None
+    for candidate in template_candidates:
+        if os.path.exists(candidate):
+            template_path = candidate
+            break
+            
+    if template_path:
+        wb = openpyxl.load_workbook(template_path)
+    else:
+        wb = openpyxl.Workbook()
+        
+    font_data = Font(name='Bookman Old Style', size=10)
+    font_sig = Font(name='Bookman Old Style', size=14)
+    font_sig_bold = Font(name='Bookman Old Style', size=14, bold=True)
+    align_sig_center = Alignment(horizontal='center', vertical='center')
+    
+    border_thin = Border(
+        left=Side(style='thin', color='000000'),
+        right=Side(style='thin', color='000000'),
+        top=Side(style='thin', color='000000'),
+        bottom=Side(style='thin', color='000000')
+    )
+    align_center = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    align_left = Alignment(horizontal='left', vertical='center')
+
+    tahun_anggaran = "2026"
+    
+    # 1. Sheet Lamp.IIA (Lolos & Pengganti Terurut per Kabupaten, Kecamatan, Desa)
+    ws_iia = wb["Lamp.IIA"] if "Lamp.IIA" in wb.sheetnames else wb.active
+    ws_iia.title = "Lamp.IIA"
+    
+    ws_iia.page_setup.orientation = ws_iia.ORIENTATION_LANDSCAPE
+    ws_iia.page_setup.paperSize = ws_iia.PAPERSIZE_A4
+    if ws_iia.sheet_properties and ws_iia.sheet_properties.pageSetUpPr:
+        ws_iia.sheet_properties.pageSetUpPr.fitToPage = True
+    ws_iia.page_setup.fitToWidth = 1
+    ws_iia.page_setup.fitToHeight = 0
+    ws_iia.page_margins.left = 0.5
+    ws_iia.page_margins.right = 0.5
+    ws_iia.page_margins.top = 0.5
+    ws_iia.page_margins.bottom = 0.5
+
+    ws_iia['A2'] = "DAFTAR HASIL VERIFIKASI FAKTUAL CALON PENERIMA BANTUAN"
+    ws_iia['A3'] = f"BEDAH RUMAH TAHUN {tahun_anggaran}"
+    ws_iia['A4'] = f"PROVINSI {prov_name}"
+    
+    if ws_iia.max_row >= 8:
+        ws_iia.delete_rows(8, ws_iia.max_row - 7)
+        
+    iia_items = []
+    for rec in lolos_records:
+        iia_items.append({
+            'nama': rec['nama'],
+            'jenis_kelamin': rec['jenis_kelamin'],
+            'no_kk': rec['no_kk'],
+            'no_ktp': rec['no_ktp'],
+            'alamat': rec['alamat'],
+            'desa_kelurahan': rec['desa_kelurahan'] or '',
+            'kecamatan': rec['kecamatan'] or '',
+            'kabupaten_kota': rec['kabupaten_kota'] or '',
+            'status_label': 'LOLOS',
+            'tahap': rec['tahap'] or stage_name,
+            'tanggal': rec['tanggal'] or rec.get('tanggal_ba') or '',
+            'keterangan': rec['keterangan'] or ''
+        })
+        
+    for rec in tidak_lolos_records:
+        nama_p = (rec.get('nama_pengganti') or '').strip()
+        if nama_p and nama_p != 'NONE':
+            iia_items.append({
+                'nama': nama_p,
+                'jenis_kelamin': rec.get('jenis_kelamin_pengganti') or '',
+                'no_kk': rec.get('no_kk_pengganti') or '',
+                'no_ktp': rec.get('no_ktp_pengganti') or '',
+                'alamat': rec.get('alamat_pengganti') or '',
+                'desa_kelurahan': rec.get('desa_kelurahan_pengganti') or rec.get('desa_kelurahan') or '',
+                'kecamatan': rec.get('kecamatan_pengganti') or rec.get('kecamatan') or '',
+                'kabupaten_kota': rec.get('kabupaten_pengganti') or rec.get('kabupaten_kota') or '',
+                'status_label': 'PENGGANTI',
+                'tahap': rec['tahap'] or stage_name,
+                'tanggal': rec['tanggal'] or rec.get('tanggal_ba') or '',
+                'keterangan': f"Pengganti dari {rec['nama']}" if rec.get('nama') else (rec.get('keterangan') or '')
+            })
+            
+    def iia_sort_key(item):
+        kab = (item['kabupaten_kota'] or '').strip().upper()
+        kec = (item['kecamatan'] or '').strip().upper()
+        desa = (item['desa_kelurahan'] or '').strip().upper()
+        st = 0 if item['status_label'] == 'LOLOS' else 1
+        nama = (item['nama'] or '').strip().upper()
+        return (kab, kec, desa, st, nama)
+        
+    iia_items.sort(key=iia_sort_key)
+    
+    r_idx = 8
+    for idx, item in enumerate(iia_items, 1):
+        ws_iia.row_dimensions[r_idx].height = 28.05
+        vals = [
+            idx,
+            item['nama'],
+            item['jenis_kelamin'],
+            item['no_kk'],
+            item['no_ktp'],
+            item['alamat'],
+            item['desa_kelurahan'],
+            item['kecamatan'],
+            item['kabupaten_kota'],
+            item['status_label'],
+            item['tahap'],
+            item['tanggal'],
+            item['keterangan']
+        ]
+        for c_idx, v in enumerate(vals, 1):
+            cell = ws_iia.cell(row=r_idx, column=c_idx, value=v)
+            cell.font = font_data
+            cell.border = border_thin
+            if c_idx in (1, 3, 4, 5, 10, 11, 12):
+                cell.alignment = align_center
+            else:
+                cell.alignment = align_left
+        r_idx += 1
+        
+    # Tanda Tangan Lamp.IIA
+    row_sig_iia = r_idx + 2
+    ws_iia.cell(row=row_sig_iia, column=11, value="Makassar, ").font = font_sig
+    ws_iia.cell(row=row_sig_iia, column=11).alignment = align_sig_center
+    
+    ws_iia.cell(row=row_sig_iia + 1, column=11, value="Pelaksana/Ketua Tim Verifikasi Faktual,").font = font_sig
+    ws_iia.cell(row=row_sig_iia + 1, column=11).alignment = align_sig_center
+    
+    ws_iia.cell(row=row_sig_iia + 5, column=11, value="( ................................................. )").font = font_sig
+    ws_iia.cell(row=row_sig_iia + 5, column=11).alignment = align_sig_center
+
+    # 2. Sheet Lamp.IIIA (Daftar Tidak Lolos & Pengganti Lengkap)
+    ws_iiia = wb["Lamp.IIIA"] if "Lamp.IIIA" in wb.sheetnames else wb.create_sheet("Lamp.IIIA")
+    ws_iiia.title = "Lamp.IIIA"
+    
+    ws_iiia.page_setup.orientation = ws_iiia.ORIENTATION_LANDSCAPE
+    ws_iiia.page_setup.paperSize = ws_iiia.PAPERSIZE_A4
+    if ws_iiia.sheet_properties and ws_iiia.sheet_properties.pageSetUpPr:
+        ws_iiia.sheet_properties.pageSetUpPr.fitToPage = True
+    ws_iiia.page_setup.fitToWidth = 1
+    ws_iiia.page_setup.fitToHeight = 0
+    ws_iiia.page_margins.left = 0.5
+    ws_iiia.page_margins.right = 0.5
+    ws_iiia.page_margins.top = 0.5
+    ws_iiia.page_margins.bottom = 0.5
+
+    ws_iiia['A2'] = "DAFTAR CALON PENGGANTI CALON PENERIMA BANTUAN"
+    ws_iiia['A3'] = f"BEDAH RUMAH TAHUN {tahun_anggaran}"
+    ws_iiia['A4'] = f"PROVINSI {prov_name}"
+
+    has_22_cols = (ws_iiia.cell(row=7, column=5).value and 'KK' in str(ws_iiia.cell(row=7, column=5).value).upper())
+    is_21_cols = (ws_iiia.cell(row=7, column=14).value and 'NO.KK' in str(ws_iiia.cell(row=7, column=14).value).upper())
+    
+    if ws_iiia.max_row >= 8:
+        ws_iiia.delete_rows(8, ws_iiia.max_row - 7)
+            
+    # Sort Tidak Lolos per Kabupaten, Kecamatan, Desa
+    tidak_lolos_records.sort(key=lambda r: (
+        (r.get('kabupaten_kota') or '').strip().upper(),
+        (r.get('kecamatan') or '').strip().upper(),
+        (r.get('desa_kelurahan') or '').strip().upper(),
+        (r.get('nama') or '').strip().upper()
+    ))
+
+    r_idx = 8
+    for idx, rec in enumerate(tidak_lolos_records, 1):
+        ws_iiia.row_dimensions[r_idx].height = 28.05
+        if has_22_cols:
+            vals = [
+                idx,
+                rec['nama'],
+                rec['jenis_kelamin'],
+                rec['no_ktp'],
+                rec['no_kk'] or "",
+                rec['alamat'],
+                rec['desa_kelurahan'],
+                rec['kecamatan'],
+                rec['kabupaten_kota'] or "",
+                rec['alasan_tidak_lolos'],
+                "", # BNBA
+                rec.get('nama_pengganti') or "",
+                rec.get('jenis_kelamin_pengganti') or "",
+                rec.get('no_ktp_pengganti') or "",
+                rec.get('no_kk_pengganti') or "",
+                rec.get('alamat_pengganti') or "",
+                rec.get('desa_kelurahan_pengganti') or "",
+                rec.get('kecamatan_pengganti') or "",
+                rec.get('kabupaten_pengganti') or rec.get('kabupaten_kota') or "",
+                rec['tahap'] or stage_name,
+                rec['tanggal'] or rec.get('tanggal_ba') or "",
+                rec['keterangan'] or ""
+            ]
+            center_cols = {1, 3, 4, 5, 10, 11, 13, 14, 15, 20, 21}
+        elif is_21_cols:
+            vals = [
+                idx,
+                rec['nama'],
+                rec['jenis_kelamin'],
+                rec['no_ktp'],
+                rec['alamat'],
+                rec['desa_kelurahan'],
+                rec['kecamatan'],
+                rec['kabupaten_kota'] or "",
+                rec['alasan_tidak_lolos'],
+                "", # BNBA
+                rec.get('nama_pengganti') or "",
+                rec.get('jenis_kelamin_pengganti') or "",
+                rec.get('no_ktp_pengganti') or "",
+                rec.get('no_kk_pengganti') or "",
+                rec.get('alamat_pengganti') or "",
+                rec.get('desa_kelurahan_pengganti') or "",
+                rec.get('kecamatan_pengganti') or "",
+                rec.get('kabupaten_pengganti') or rec.get('kabupaten_kota') or "",
+                rec['tahap'] or stage_name,
+                rec['tanggal'] or rec.get('tanggal_ba') or "",
+                rec['keterangan'] or ""
+            ]
+            center_cols = {1, 3, 4, 9, 10, 12, 13, 14, 19, 20}
+        else:
+            vals = [
+                idx,
+                rec['nama'],
+                rec['jenis_kelamin'],
+                rec['no_ktp'],
+                rec['alamat'],
+                rec['desa_kelurahan'],
+                rec['kabupaten_kota'] or "",
+                rec['alasan_tidak_lolos'],
+                "", # BNBA
+                rec.get('nama_pengganti') or "",
+                rec.get('jenis_kelamin_pengganti') or "",
+                rec.get('no_ktp_pengganti') or "",
+                rec.get('alamat_pengganti') or "",
+                rec.get('desa_kelurahan_pengganti') or "",
+                rec.get('kabupaten_pengganti') or rec.get('kabupaten_kota') or "",
+                rec['tahap'] or stage_name,
+                rec['tanggal'] or rec.get('tanggal_ba') or "",
+                rec['keterangan'] or ""
+            ]
+            center_cols = {1, 3, 4, 8, 9, 11, 12, 16, 17}
+            
+        for c_idx, v in enumerate(vals, 1):
+            cell = ws_iiia.cell(row=r_idx, column=c_idx, value=v)
+            cell.font = font_data
+            cell.border = border_thin
+            if c_idx in center_cols:
+                cell.alignment = align_center
+            else:
+                cell.alignment = align_left
+        r_idx += 1
+        
+    # Tanda Tangan & Catatan Lamp.IIIA
+    row_sig_iiia = r_idx + 2
+    col_left = 5
+    col_right = 18 if (has_22_cols or is_21_cols) else 15
+    
+    # Left: Mengetahui - Kepala Balai
+    ws_iiia.cell(row=row_sig_iiia, column=col_left, value="Mengetahui,").font = font_sig
+    ws_iiia.cell(row=row_sig_iiia, column=col_left).alignment = align_sig_center
+    
+    ws_iiia.cell(row=row_sig_iiia + 1, column=col_left, value="Kepala Balai Pelaksana ").font = font_sig
+    ws_iiia.cell(row=row_sig_iiia + 1, column=col_left).alignment = align_sig_center
+    
+    ws_iiia.cell(row=row_sig_iiia + 2, column=col_left, value="Penyediaan Perumahan dan ").font = font_sig
+    ws_iiia.cell(row=row_sig_iiia + 2, column=col_left).alignment = align_sig_center
+    
+    ws_iiia.cell(row=row_sig_iiia + 3, column=col_left, value="Kawasan Permukiman Sulawesi III,").font = font_sig
+    ws_iiia.cell(row=row_sig_iiia + 3, column=col_left).alignment = align_sig_center
+    
+    ws_iiia.cell(row=row_sig_iiia + 7, column=col_left, value="( ................................................. )").font = font_sig
+    ws_iiia.cell(row=row_sig_iiia + 7, column=col_left).alignment = align_sig_center
+
+    # Right: Pelaksana/Ketua Tim Verifikasi Faktual
+    ws_iiia.cell(row=row_sig_iiia, column=col_right, value="Makassar, ").font = font_sig
+    ws_iiia.cell(row=row_sig_iiia, column=col_right).alignment = align_sig_center
+    
+    ws_iiia.cell(row=row_sig_iiia + 1, column=col_right, value="Pelaksana/Ketua Tim ").font = font_sig
+    ws_iiia.cell(row=row_sig_iiia + 1, column=col_right).alignment = align_sig_center
+    
+    ws_iiia.cell(row=row_sig_iiia + 2, column=col_right, value="Verifikasi Faktual,").font = font_sig
+    ws_iiia.cell(row=row_sig_iiia + 2, column=col_right).alignment = align_sig_center
+    
+    ws_iiia.cell(row=row_sig_iiia + 7, column=col_right, value="( ................................................. )").font = font_sig
+    ws_iiia.cell(row=row_sig_iiia + 7, column=col_right).alignment = align_sig_center
+
+    # Notes (Catatan)
+    row_notes = row_sig_iiia + 13
+    notes_list = [
+        ("Catatan:", True),
+        ("*) Alasan Tidak Lolos, diisi dengan angka (1-8) sebagai berikut:", False),
+        ("1. Belum memiliki KK sendiri;", False),
+        ("2. Tanah bersengketa;", False),
+        ("3. Rumah dalam kondisi layak;", False),
+        ("4. Memiliki rumah lebih dari 1;", False),
+        ("5. Pernah memperoleh bantuan dari APBN/APBD/CSR/anggaran lainnya;", False),
+        ("6. Penghasilan lebih dari UMP;", False),
+        ("7. Memilih untuk dibantu dengan sumber anggaran lain;", False),
+        ("8. Menghuni kurang dari 3 tahun;", False),
+        ("9. Lainnya (diisi pada kolom keterangan);", False)
+    ]
+    for n_idx, (ntxt, is_b) in enumerate(notes_list):
+        cell_n = ws_iiia.cell(row=row_notes + n_idx, column=1, value=ntxt)
+        cell_n.font = Font(name='Bookman Old Style', size=14, bold=is_b)
+        
+    stream = io.BytesIO()
+    wb.save(stream)
+    stream.seek(0)
+    
+    log_activity(
+        username="Admin",
+        action="EXPORT_EXCEL",
+        entity_type="STAGE_VERFAL",
+        entity_name=stage_name,
+        details=f"Ekspor Excel Verfal gabungan seluruh kabupaten pada tahap '{stage_name}'"
+    )
+    
+    clean_stage = stage_name.replace(' ', '_')
+    clean_prov = prov_name.replace(' ', '_')
+    filename = f"VERFAL_GABUNGAN_{clean_stage}_{clean_prov}.xlsx"
+    return StreamingResponse(
+        stream,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
 @app.post("/api/verified/records/bulk-delete")
 async def bulk_delete_verified_records(record_ids: str = Form(...)):
     """Bulk delete verified records by comma-separated IDs."""
