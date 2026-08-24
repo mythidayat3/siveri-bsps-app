@@ -958,7 +958,7 @@ function App() {
 
   const handleAddProvince = async (e) => {
     e.preventDefault();
-    const trimmed = newProvinceNameInput.trim().toUpperCase();
+    const trimmed = newProvinceNameInput.trim();
     if (!trimmed) {
       showToast("Nama provinsi tidak boleh kosong", "error");
       return;

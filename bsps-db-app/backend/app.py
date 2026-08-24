@@ -1,10 +1,12 @@
 import io
 import os
+import re
 import time
 import sqlite3
 import openpyxl
 import docx
 import zipfile
+from collections import Counter
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import cm, mm
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -84,6 +86,29 @@ def log_activity(username: str, action: str, entity_type: str = None, entity_nam
         conn.close()
     except Exception as e:
         print(f"Error logging activity: {e}")
+
+def clean_province_for_export(prov_name: str) -> str:
+    """
+    Cleans a custom province name like:
+    'SULAWESI SELATAN <perkotaan/perdesaan>' -> 'SULAWESI SELATAN'
+    'SULAWESI SELATAN (Perkotaan/Perdesaan)' -> 'SULAWESI SELATAN'
+    'SULAWESI SELATAN (Wilayah Perkotaan)' -> 'SULAWESI SELATAN'
+    'PROVINSI SULAWESI SELATAN (Perdesaan)' -> 'SULAWESI SELATAN'
+    """
+    if not prov_name:
+        return "SULAWESI SELATAN"
+    
+    name = str(prov_name).strip()
+    name = re.sub(r'<[^>]*>', '', name)
+    name = re.sub(r'\([^)]*\)', '', name)
+    name = re.sub(r'\[[^\]]*\]', '', name)
+    name = re.sub(r'\{[^}]*\}', '', name)
+    name = re.sub(r'\s+', ' ', name).strip()
+    
+    if name.upper().startswith("PROVINSI "):
+        name = name[9:].strip()
+        
+    return name.upper() if name else "SULAWESI SELATAN"
 
 @app.post("/api/login")
 def login(request: Request, body: dict = Body(...)):
@@ -267,9 +292,20 @@ def get_provinces():
 
 @app.post("/api/provinces")
 def create_province(body: dict = Body(...)):
-    name = body.get("name", "").strip().upper()
-    if not name:
+    raw_name = body.get("name", "").strip()
+    if not raw_name:
         raise HTTPException(status_code=400, detail="Nama provinsi tidak boleh kosong")
+        
+    match = re.search(r'<([^>]+)>', raw_name)
+    if match:
+        scope = match.group(1).strip()
+        base = raw_name[:match.start()].strip().upper()
+        formatted_scope = "/".join([s.strip().capitalize() for s in scope.split("/")]) if "/" in scope else scope.strip().capitalize()
+        name = f"{base} ({formatted_scope})"
+    else:
+        name = raw_name.strip()
+        if not name.endswith(')'):
+            name = name.upper()
         
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -284,7 +320,16 @@ def create_province(body: dict = Body(...)):
         conn.close()
         raise HTTPException(status_code=500, detail=f"Gagal menambahkan provinsi: {str(e)}")
     conn.close()
-    return {"id": prov_id, "name": name, "message": f"Provinsi {name} berhasil ditambahkan"}
+    
+    log_activity(
+        username="Admin",
+        action="CREATE_PROVINCE",
+        entity_type="PROVINCE",
+        entity_name=name,
+        details=f"Menambahkan wilayah provinsi baru: '{name}'"
+    )
+    
+    return {"id": prov_id, "name": name, "message": f"Provinsi '{name}' berhasil ditambahkan"}
 
 @app.delete("/api/provinces/{province_id}")
 def delete_province(province_id: int):
@@ -2410,8 +2455,15 @@ async def export_docx_files(
     # Ambil Data
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT name FROM invers_stages WHERE id = ?", (stage_id,))
-    stage_name = cursor.fetchone()['name']
+    cursor.execute("""
+        SELECT s.name as stage_name, p.name as province_name 
+        FROM invers_stages s 
+        LEFT JOIN provinces p ON s.province_id = p.id 
+        WHERE s.id = ?
+    """, (stage_id,))
+    stage_row = cursor.fetchone()
+    stage_name = stage_row['stage_name'] if stage_row else "Tahap"
+    prov_clean = clean_province_for_export(stage_row['province_name'] if stage_row and stage_row['province_name'] else "SULAWESI SELATAN")
     
     batch_name = None
     if batch_id:
@@ -2429,8 +2481,8 @@ async def export_docx_files(
     # Total data INVERS di tahap aktif
     cursor.execute("""
         SELECT COUNT(*) as cnt FROM invers_records ir
-        JOIN invers_revisions irv ON ir.revision_id = irv.id
-        WHERE irv.stage_id = ? AND irv.is_active = 1
+        JOIN invers_revisions rev ON ir.revision_id = rev.id
+        WHERE rev.stage_id = ? AND rev.is_active = 1
     """, (stage_id,))
     total_invers = cursor.fetchone()['cnt']
     
@@ -2438,9 +2490,10 @@ async def export_docx_files(
     if batch_id:
         cursor.execute("""
             SELECT COUNT(*) as cnt FROM verified_records vr
-            LEFT JOIN reconciliation_overrides ro ON ro.original_no_ktp = vr.no_ktp AND ro.stage_id = ?
+            JOIN verified_batches vb ON vr.batch_id = vb.id
+            LEFT JOIN reconciliation_overrides ro ON ro.original_no_ktp = vr.no_ktp AND ro.stage_id = vb.stage_id
             WHERE vr.batch_id = ? AND (vr.is_duplicate_in_previous = 0 OR ro.id IS NOT NULL)
-        """, (stage_id, batch_id))
+        """, (batch_id,))
     else:
         cursor.execute("""
             SELECT COUNT(*) as cnt FROM verified_records vr
@@ -2490,7 +2543,7 @@ async def export_docx_files(
     conn.close()
     
     # Perihal surat penyampaian
-    perihal_surat_penyampaian = f"Penyampaian Hasil Verifikasi Calon Penerima Bantuan (CPB) Kegiatan Bantuan Stimulan Perumahan Swadaya (BSPS) {stage_name} TA 2026 Provinsi Sulawesi Selatan"
+    perihal_surat_penyampaian = f"Penyampaian Hasil Verifikasi Calon Penerima Bantuan (CPB) Kegiatan Bantuan Stimulan Perumahan Swadaya (BSPS) {stage_name} TA 2026 Provinsi {prov_clean.title()}"
     
     replacements = {
         "[NOMOR BA]": nomor_ba,
@@ -2498,8 +2551,9 @@ async def export_docx_files(
         "[Nomor Surat]": nomor_surat,
         "[NAMA TAHAP]": stage_name.upper(),
         "[Nama Tahap]": stage_name,
-        "[NAMA PROVINSI]": "SULAWESI SELATAN",
-        "[Nama Provinsi]": "Sulawesi Selatan",
+        "[NAMA PROVINSI]": prov_clean,
+        "[Nama Provinsi]": prov_clean.title(),
+        "[Provinsi Aktif]": prov_clean,
         "[Tanggal Eksport BA]": tanggal_ba,
         "[Lokasi BA]": lokasi_ba,
         "[Nomor Surat Dirjen]": no_surat_dirjen,
@@ -2972,7 +3026,8 @@ async def export_verfal_docx(
         
     stage_id = batch['stage_id']
     stage_name = batch['stage_name']
-    prov_name = batch['province_name'] or "SULAWESI SELATAN"
+    prov_name_raw = batch['province_name'] or "SULAWESI SELATAN"
+    prov_name = clean_province_for_export(prov_name_raw)
     kab_name = (batch['kabupaten'] or "").upper().strip()
     batch_name = batch['name']
     
@@ -3200,7 +3255,8 @@ def export_verfal_excel(batch_id: int):
         
     stage_id = batch['stage_id']
     stage_name = batch['stage_name']
-    prov_name = batch['province_name'] or "SULAWESI SELATAN"
+    prov_name_raw = batch['province_name'] or "SULAWESI SELATAN"
+    prov_name = clean_province_for_export(prov_name_raw)
     kab_name = (batch['kabupaten'] or "").upper().strip()
     batch_name = batch['name']
     
@@ -6396,8 +6452,15 @@ def export_excel(stage_id: int, batch_id: int = None):
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT name FROM invers_stages WHERE id = ?", (stage_id,))
-    stage_name = cursor.fetchone()['name']
+    cursor.execute("""
+        SELECT s.name as stage_name, p.name as province_name 
+        FROM invers_stages s 
+        LEFT JOIN provinces p ON s.province_id = p.id 
+        WHERE s.id = ?
+    """, (stage_id,))
+    stage_row = cursor.fetchone()
+    stage_name = stage_row['stage_name'] if stage_row else "Tahap"
+    prov_name_clean = clean_province_for_export(stage_row['province_name'] if stage_row and stage_row['province_name'] else "SULAWESI SELATAN")
     
     if batch_id:
         cursor.execute("SELECT name FROM verified_batches WHERE id = ?", (batch_id,))
@@ -6495,7 +6558,7 @@ def export_excel(stage_id: int, batch_id: int = None):
     ws_ia.cell(row=2, column=1).alignment = align_center
     ws_ia.cell(row=3, column=1, value=f"KEGIATAN BANTUAN STIMULAN PERUMAHAN SWADAYA {stage_name.upper()} TAHUN 2026").font = f_title
     ws_ia.cell(row=3, column=1).alignment = align_center
-    ws_ia.cell(row=4, column=1, value="PROVINSI SULAWESI SELATAN").font = f_title
+    ws_ia.cell(row=4, column=1, value=f"PROVINSI {prov_name_clean}").font = f_title
     ws_ia.cell(row=4, column=1).alignment = align_center
     
     headers_ia_row1 = ["No.", "KABUPATEN/KOTA", "CPB (unit)", "Hasil Verifikasi", "", ""]
@@ -6581,7 +6644,7 @@ def export_excel(stage_id: int, batch_id: int = None):
     ws_iia.cell(row=2, column=1).alignment = align_center
     ws_iia.cell(row=3, column=1, value=f"KEGIATAN BANTUAN STIMULAN PERUMAHAN SWADAYA {stage_name.upper()} TAHUN 2026").font = f_title
     ws_iia.cell(row=3, column=1).alignment = align_center
-    ws_iia.cell(row=4, column=1, value="PROVINSI SULAWESI SELATAN").font = f_title
+    ws_iia.cell(row=4, column=1, value=f"PROVINSI {prov_name_clean}").font = f_title
     ws_iia.cell(row=4, column=1).alignment = align_center
     
     headers_iia = [
@@ -6652,7 +6715,7 @@ def export_excel(stage_id: int, batch_id: int = None):
     ws_iiia.cell(row=2, column=1).alignment = align_center
     ws_iiia.cell(row=3, column=1, value=f"STIMULAN PERUMAHAN SWADAYA {stage_name.upper()} TAHUN 2026").font = f_title
     ws_iiia.cell(row=3, column=1).alignment = align_center
-    ws_iiia.cell(row=4, column=1, value="PROVINSI SULAWESI SELATAN").font = f_title
+    ws_iiia.cell(row=4, column=1, value=f"PROVINSI {prov_name_clean}").font = f_title
     ws_iiia.cell(row=4, column=1).alignment = align_center
     
     headers_iiia_top = ["NO.", "TIDAK LOLOS", "", "", "", "", "", "", "", "", "SESUDAH", "", "", "", "", "", "", "", "", "INSTRUKSI VERIFIKASI", "", "KETERANGAN"]
