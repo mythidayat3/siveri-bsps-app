@@ -42,7 +42,15 @@ def find_header_and_data(sheet):
         cleaned_cells = [str(c).strip().replace('\n', ' ').upper() if c is not None else '' for c in row]
         if 'NAMA' in cleaned_cells and any('KTP' in c or 'NIK' in c or 'KARTU' in c for c in cleaned_cells):
             header_row_idx = r_idx
-            headers = [str(c).strip().replace('\n', ' ') if c is not None else f'COL_{i}' for i, c in enumerate(row)]
+            prev_row = rows[r_idx-1] if r_idx > 0 else []
+            headers = []
+            for i, c in enumerate(row):
+                if c is not None and str(c).strip():
+                    headers.append(str(c).strip().replace('\n', ' '))
+                elif i < len(prev_row) and prev_row[i] is not None and str(prev_row[i]).strip():
+                    headers.append(str(prev_row[i]).strip().replace('\n', ' '))
+                else:
+                    headers.append(f'COL_{i}')
             break
     if header_row_idx is not None:
         data_rows = []
@@ -867,44 +875,65 @@ async def upload_verfal(
         elif 'KELAMIN' in h_upper or 'JENIS' in h_upper: h_lolos_map['jenis_kelamin'] = idx
         
     h_tidak_map = {}
+    bnba_col_idx = None
+    for idx, h in enumerate(headers_tidak):
+        h_upper = str(h or '').upper().replace('\n', ' ').strip()
+        if 'BNBA' in h_upper:
+            bnba_col_idx = idx
+            break
+    if bnba_col_idx is None:
+        bnba_col_idx = 10 if len(headers_tidak) >= 22 else 9
+        
     for idx, h in enumerate(headers_tidak):
         h_upper = str(h or '').upper().replace('\n', ' ').strip()
         h_clean = h_upper.replace(' ', '')
         
-        # Kolom Pengganti (jika ada kata PENGGANTI atau kolom >= 9)
-        if 'PENGGANTI' in h_upper:
-            if 'NAMA' in h_upper: h_tidak_map['nama_pengganti'] = idx
-            elif 'KTP' in h_upper or 'NIK' in h_upper: h_tidak_map['no_ktp_pengganti'] = idx
-            elif 'KK' in h_upper: h_tidak_map['no_kk_pengganti'] = idx
-            elif 'KELAMIN' in h_upper or 'JENIS' in h_upper: h_tidak_map['jenis_kelamin_pengganti'] = idx
-            elif 'ALAMAT' in h_upper: h_tidak_map['alamat_pengganti'] = idx
-            elif 'DESA' in h_upper or 'KELURAHAN' in h_upper: h_tidak_map['desa_kelurahan_pengganti'] = idx
-            elif 'KECAMATAN' in h_upper: h_tidak_map['kecamatan_pengganti'] = idx
-            elif 'KABUPATEN' in h_upper or 'KOTA' in h_upper: h_tidak_map['kabupaten_pengganti'] = idx
-        elif idx >= 9:
-            if 'BNBA' in h_upper: h_tidak_map['bnba'] = idx
-            elif 'NAMA' in h_upper and 'nama_pengganti' not in h_tidak_map: h_tidak_map['nama_pengganti'] = idx
-            elif ('KELAMIN' in h_upper or 'JENIS' in h_upper) and 'jenis_kelamin_pengganti' not in h_tidak_map: h_tidak_map['jenis_kelamin_pengganti'] = idx
-            elif ('KTP' in h_upper or 'NIK' in h_upper) and 'no_ktp_pengganti' not in h_tidak_map: h_tidak_map['no_ktp_pengganti'] = idx
-            elif 'KK' in h_upper and 'no_kk_pengganti' not in h_tidak_map: h_tidak_map['no_kk_pengganti'] = idx
-            elif 'ALAMAT' in h_upper and 'alamat_pengganti' not in h_tidak_map: h_tidak_map['alamat_pengganti'] = idx
-            elif ('DESA' in h_upper or 'KELURAHAN' in h_upper) and 'desa_kelurahan_pengganti' not in h_tidak_map: h_tidak_map['desa_kelurahan_pengganti'] = idx
-            elif 'KECAMATAN' in h_upper and 'kecamatan_pengganti' not in h_tidak_map: h_tidak_map['kecamatan_pengganti'] = idx
-            elif ('KABUPATEN' in h_upper or 'KOTA' in h_upper) and 'kabupaten_pengganti' not in h_tidak_map: h_tidak_map['kabupaten_pengganti'] = idx
-            elif 'TAHAP' in h_upper: h_tidak_map['tahap'] = idx
-            elif 'TANGGAL' in h_upper: h_tidak_map['tanggal'] = idx
-            elif 'KETERANGAN' in h_upper: h_tidak_map['keterangan'] = idx
+        if 'BNBA' in h_upper:
+            h_tidak_map['bnba'] = idx
+        elif 'PENGGANTI' in h_upper or idx > bnba_col_idx:
+            if 'NAMA' in h_upper and 'nama_pengganti' not in h_tidak_map:
+                h_tidak_map['nama_pengganti'] = idx
+            elif ('KTP' in h_upper or 'NIK' in h_upper) and 'no_ktp_pengganti' not in h_tidak_map:
+                h_tidak_map['no_ktp_pengganti'] = idx
+            elif 'KK' in h_upper and 'no_kk_pengganti' not in h_tidak_map:
+                h_tidak_map['no_kk_pengganti'] = idx
+            elif ('KELAMIN' in h_upper or 'JENIS' in h_upper) and 'jenis_kelamin_pengganti' not in h_tidak_map:
+                h_tidak_map['jenis_kelamin_pengganti'] = idx
+            elif 'ALAMAT' in h_upper and 'alamat_pengganti' not in h_tidak_map:
+                h_tidak_map['alamat_pengganti'] = idx
+            elif ('DESA' in h_upper or 'KELURAHAN' in h_upper) and 'desa_kelurahan_pengganti' not in h_tidak_map:
+                h_tidak_map['desa_kelurahan_pengganti'] = idx
+            elif 'KECAMATAN' in h_upper and 'kecamatan_pengganti' not in h_tidak_map:
+                h_tidak_map['kecamatan_pengganti'] = idx
+            elif ('KABUPATEN' in h_upper or 'KOTA' in h_upper) and 'kabupaten_pengganti' not in h_tidak_map:
+                h_tidak_map['kabupaten_pengganti'] = idx
+            elif 'TAHAP' in h_upper:
+                h_tidak_map['tahap'] = idx
+            elif 'TANGGAL' in h_upper:
+                h_tidak_map['tanggal'] = idx
+            elif 'KETERANGAN' in h_upper:
+                h_tidak_map['keterangan'] = idx
         else:
-            if h_clean == 'NO.': h_tidak_map['no_urut'] = idx
-            elif 'NAMA' in h_upper: h_tidak_map['nama'] = idx
-            elif 'KELAMIN' in h_upper or 'JENIS' in h_upper: h_tidak_map['jenis_kelamin'] = idx
-            elif 'KTP' in h_upper or 'NIK' in h_upper: h_tidak_map['no_ktp'] = idx
-            elif 'KK' in h_upper: h_tidak_map['no_kk'] = idx
-            elif 'ALAMAT' in h_upper: h_tidak_map['alamat'] = idx
-            elif 'DESA' in h_upper or 'KELURAHAN' in h_upper: h_tidak_map['desa_kelurahan'] = idx
-            elif 'KECAMATAN' in h_upper: h_tidak_map['kecamatan'] = idx
-            elif 'KABUPATEN' in h_upper or 'KOTA' in h_upper: h_tidak_map['kabupaten_kota'] = idx
-            elif 'ALASAN' in h_upper: h_tidak_map['alasan_tidak_lolos'] = idx
+            if h_clean == 'NO.' or 'URUT' in h_upper:
+                h_tidak_map['no_urut'] = idx
+            elif 'NAMA' in h_upper:
+                h_tidak_map['nama'] = idx
+            elif 'KELAMIN' in h_upper or 'JENIS' in h_upper:
+                h_tidak_map['jenis_kelamin'] = idx
+            elif 'KTP' in h_upper or 'NIK' in h_upper:
+                h_tidak_map['no_ktp'] = idx
+            elif 'KK' in h_upper:
+                h_tidak_map['no_kk'] = idx
+            elif 'ALAMAT' in h_upper:
+                h_tidak_map['alamat'] = idx
+            elif 'DESA' in h_upper or 'KELURAHAN' in h_upper:
+                h_tidak_map['desa_kelurahan'] = idx
+            elif 'KECAMATAN' in h_upper:
+                h_tidak_map['kecamatan'] = idx
+            elif 'KABUPATEN' in h_upper or 'KOTA' in h_upper:
+                h_tidak_map['kabupaten_kota'] = idx
+            elif 'ALASAN' in h_upper:
+                h_tidak_map['alasan_tidak_lolos'] = idx
             
     cursor.execute("""
         SELECT no_ktp, no_kk, status FROM verified_records vr
@@ -2362,9 +2391,7 @@ def download_template(template_type: str):
         filepath = os.path.join(BASE_DIR, "TEMPLATE SK DIRJEN.xlsx")
         filename = "TEMPLATE_SK_DIRJEN.xlsx"
     elif template_type == "verfal":
-        filepath = os.path.join(BASE_DIR, "templates", "TEMPLATE_VERFAL.xlsx")
-        if not os.path.exists(filepath):
-            filepath = os.path.join(BASE_DIR, "TEMPLATE_VERFAL.xlsx")
+        filepath = os.path.join(BASE_DIR, "TEMPLATE_VERFAL.xlsx")
         filename = "TEMPLATE_VERFAL.xlsx"
     else:
         raise HTTPException(status_code=400, detail="Tipe template tidak dikenal")
