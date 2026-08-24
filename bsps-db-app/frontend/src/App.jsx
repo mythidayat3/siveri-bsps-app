@@ -4496,7 +4496,7 @@ function App() {
                   const hasBatches = group.batches && group.batches.length > 0;
                   const isCompleted = group.total_alokasi_invers > 0 && group.totals.verifikasi === group.total_alokasi_invers;
                   return (
-                    <div key={group.kabupaten} className="verfal-kabupaten-card">
+                    <div key={group.kabupaten} className={`verfal-kabupaten-card ${isCompleted ? 'is-completed' : ''}`}>
                       <div 
                         className={`verfal-kabupaten-header ${isExpanded ? 'expanded' : ''}`}
                         onClick={() => toggleVerfalAccordion(group.kabupaten)}
@@ -4521,11 +4521,11 @@ function App() {
 
                         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                           <div className="verfal-grid-metrics">
-                            <div className={`verfal-metric-col col-alokasi ${isCompleted ? 'is-completed' : ''}`} title="Alokasi Data INVERS">
+                            <div className="verfal-metric-col col-alokasi" title="Alokasi Data INVERS">
                               <span className="metric-label">Alokasi</span>
                               <span className="metric-value">{group.total_alokasi_invers}</span>
                             </div>
-                            <div className={`verfal-metric-col col-verif ${isCompleted ? 'is-completed' : ''}`} title={`Verifikasi Gabungan: Verfal (${group.totals.verfal?.verifikasi || 0}) | Reguler (${group.totals.regular?.verifikasi || 0})`}>
+                            <div className="verfal-metric-col col-verif" title={`Verifikasi Gabungan: Verfal (${group.totals.verfal?.verifikasi || 0}) | Reguler (${group.totals.regular?.verifikasi || 0})`}>
                               <span className="metric-label">Verifikasi</span>
                               <span className="metric-value">{group.totals.verifikasi}</span>
                               <span className="metric-sub">{group.totals.verfal?.verifikasi || 0} | {group.totals.regular?.verifikasi || 0}</span>
@@ -4544,7 +4544,7 @@ function App() {
                                 {group.totals.pengganti > 0 ? group.totals.pengganti : '-'}
                               </span>
                             </div>
-                            <div className={`verfal-metric-col col-sisa ${isCompleted ? 'is-completed' : ''}`} title="Sisa Belum Terverifikasi">
+                            <div className="verfal-metric-col col-sisa" title="Sisa Belum Terverifikasi">
                               <span className="metric-label">Sisa</span>
                               <span className="metric-value">{group.totals.belum_verifikasi}</span>
                             </div>

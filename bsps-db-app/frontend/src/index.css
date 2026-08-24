@@ -3940,53 +3940,23 @@ body {
   color: #94a3b8;
 }
 
-/* Soft Green Capsules for Completed Verification */
-.verfal-metric-col.col-alokasi.is-completed,
-.verfal-metric-col.col-verif.is-completed,
-.verfal-metric-col.col-sisa.is-completed {
-  background: #ecfdf5;
-  border-color: #a7f3d0;
+/* Soft Green Border for Completed Verification Kabupaten Card */
+.verfal-kabupaten-card.is-completed {
+  border-color: #34d399;
+  border-width: 1.5px;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.08);
 }
-.verfal-metric-col.col-alokasi.is-completed .metric-value,
-.verfal-metric-col.col-verif.is-completed .metric-value {
-  color: #047857;
+.verfal-kabupaten-card.is-completed:hover {
+  border-color: #10b981;
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.14);
 }
-.verfal-metric-col.col-alokasi.is-completed .metric-label,
-.verfal-metric-col.col-verif.is-completed .metric-label {
-  color: #059669;
+.dark .verfal-kabupaten-card.is-completed {
+  border-color: rgba(52, 211, 153, 0.45);
+  border-width: 1.5px;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.12);
 }
-.verfal-metric-col.col-verif.is-completed .metric-sub {
-  color: #10b981;
-}
-.verfal-metric-col.col-sisa.is-completed .metric-value {
-  color: #059669;
-}
-.verfal-metric-col.col-sisa.is-completed .metric-label {
-  color: #059669;
-}
-
-.dark .verfal-metric-col.col-alokasi.is-completed,
-.dark .verfal-metric-col.col-verif.is-completed,
-.dark .verfal-metric-col.col-sisa.is-completed {
-  background: rgba(6, 78, 59, 0.35);
-  border-color: rgba(16, 185, 129, 0.35);
-}
-.dark .verfal-metric-col.col-alokasi.is-completed .metric-value,
-.dark .verfal-metric-col.col-verif.is-completed .metric-value {
-  color: #6ee7b7;
-}
-.dark .verfal-metric-col.col-alokasi.is-completed .metric-label,
-.dark .verfal-metric-col.col-verif.is-completed .metric-label {
-  color: #34d399;
-}
-.dark .verfal-metric-col.col-verif.is-completed .metric-sub {
-  color: #34d399;
-}
-.dark .verfal-metric-col.col-sisa.is-completed .metric-value {
-  color: #6ee7b7;
-}
-.dark .verfal-metric-col.col-sisa.is-completed .metric-label {
-  color: #34d399;
+.dark .verfal-kabupaten-card.is-completed:hover {
+  border-color: rgba(52, 211, 153, 0.65);
 }
 
 /* Badge Siap Terbit BA Verfal */
