@@ -3046,10 +3046,11 @@ async def export_verfal_docx(
         LEFT JOIN provinces p ON s.province_id = p.id
         WHERE vb.id = ?
     """, (batch_id,))
-    batch = cursor.fetchone()
-    if not batch:
+    batch_row = cursor.fetchone()
+    if not batch_row:
         conn.close()
         raise HTTPException(status_code=404, detail="Batch Verfal tidak ditemukan")
+    batch = dict(batch_row)
         
     stage_id = batch['stage_id']
     stage_name = batch['stage_name']
@@ -3275,10 +3276,11 @@ def export_verfal_excel(batch_id: int):
         LEFT JOIN provinces p ON s.province_id = p.id
         WHERE vb.id = ?
     """, (batch_id,))
-    batch = cursor.fetchone()
-    if not batch:
+    batch_row = cursor.fetchone()
+    if not batch_row:
         conn.close()
         raise HTTPException(status_code=404, detail="Batch Verfal tidak ditemukan")
+    batch = dict(batch_row)
         
     stage_id = batch['stage_id']
     stage_name = batch['stage_name']
