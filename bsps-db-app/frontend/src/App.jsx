@@ -3250,7 +3250,7 @@ function App() {
       <header className="mobile-header-bar">
         <div className="mobile-logo-group">
           <img src={logopkp} alt="Logo PKP" className="mobile-logo-img" />
-          <span className="mobile-logo-text">E-Bedah Rumah</span>
+          <span className="mobile-logo-text">Bedah Rumah</span>
         </div>
         <button 
           className="mobile-hamburger-btn" 
@@ -3274,7 +3274,7 @@ function App() {
       <aside className={`sidebar ${mobileMenuOpen ? 'mobile-open' : ''}`}>
         <div className="logo-container">
           <img src={logopkp} alt="Logo PKP" className="logo-img" />
-          <span className="logo-text">E-Bedah Rumah</span>
+          <span className="logo-text">Bedah Rumah</span>
           <button 
             type="button" 
             className="mobile-sidebar-close" 
@@ -3543,7 +3543,7 @@ function App() {
             {darkMode ? 'Mode Terang' : 'Mode Gelap'}
           </button>
           <div style={{ marginTop: '10px', fontSize: '0.72rem', color: '#a7f3d0', textAlign: 'center', fontWeight: '500' }}>
-            Kementerian PKP - E-Bedah Rumah v1.1.0
+            Kementerian PKP - Bedah Rumah v1.1.0
           </div>
         </div>
       </aside>
