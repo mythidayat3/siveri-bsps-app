@@ -4494,31 +4494,38 @@ function App() {
                 verfalData.kabupaten_groups.map((group) => {
                   const isExpanded = expandedVerfalKabupatens.has(group.kabupaten);
                   const hasBatches = group.batches && group.batches.length > 0;
+                  const isCompleted = group.total_alokasi_invers > 0 && group.totals.verifikasi === group.total_alokasi_invers;
                   return (
                     <div key={group.kabupaten} className="verfal-kabupaten-card">
                       <div 
                         className={`verfal-kabupaten-header ${isExpanded ? 'expanded' : ''}`}
                         onClick={() => toggleVerfalAccordion(group.kabupaten)}
                       >
-                        <div className="verfal-kab-title">
+                        <div className="verfal-kab-title" style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                           <span style={{ 
                             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                             width: '24px', height: '24px', borderRadius: '50%', background: isExpanded ? 'var(--primary)' : 'rgba(0,0,0,0.06)',
                             color: isExpanded ? '#ffffff' : 'var(--text-main)', transition: 'all 0.2s ease',
-                            transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)'
+                            transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)', flexShrink: 0
                           }}>
                             <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
                           </span>
                           <span className="verfal-kab-name">{group.kabupaten}</span>
+                          {isCompleted && (
+                            <span className="verfal-status-ready-badge" title="Alokasi telah 100% terverifikasi dan siap untuk penerbitan Berita Acara Verfal">
+                              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                              Siap Terbit BA Verfal
+                            </span>
+                          )}
                         </div>
 
                         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                           <div className="verfal-grid-metrics">
-                            <div className="verfal-metric-col col-alokasi" title="Alokasi Data INVERS">
+                            <div className={`verfal-metric-col col-alokasi ${isCompleted ? 'is-completed' : ''}`} title="Alokasi Data INVERS">
                               <span className="metric-label">Alokasi</span>
                               <span className="metric-value">{group.total_alokasi_invers}</span>
                             </div>
-                            <div className="verfal-metric-col col-verif" title={`Verifikasi Gabungan: Verfal (${group.totals.verfal?.verifikasi || 0}) | Reguler (${group.totals.regular?.verifikasi || 0})`}>
+                            <div className={`verfal-metric-col col-verif ${isCompleted ? 'is-completed' : ''}`} title={`Verifikasi Gabungan: Verfal (${group.totals.verfal?.verifikasi || 0}) | Reguler (${group.totals.regular?.verifikasi || 0})`}>
                               <span className="metric-label">Verifikasi</span>
                               <span className="metric-value">{group.totals.verifikasi}</span>
                               <span className="metric-sub">{group.totals.verfal?.verifikasi || 0} | {group.totals.regular?.verifikasi || 0}</span>
@@ -4537,7 +4544,7 @@ function App() {
                                 {group.totals.pengganti > 0 ? group.totals.pengganti : '-'}
                               </span>
                             </div>
-                            <div className="verfal-metric-col col-sisa" title="Sisa Belum Terverifikasi">
+                            <div className={`verfal-metric-col col-sisa ${isCompleted ? 'is-completed' : ''}`} title="Sisa Belum Terverifikasi">
                               <span className="metric-label">Sisa</span>
                               <span className="metric-value">{group.totals.belum_verifikasi}</span>
                             </div>
