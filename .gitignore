@@ -26,8 +26,12 @@ ENV/
 *.sqlite
 *.sqlite3
 *.db
+*.db-journal
+*.db-wal
+*.db-shm
 *_backup_*.sqlite
-!bsps-db-app/backend/bsps_db.sqlite
+bsps_db.sqlite
+bsps-db-app/backend/bsps_db.sqlite
 
 # Logs
 *.log
