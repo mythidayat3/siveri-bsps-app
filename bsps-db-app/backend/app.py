@@ -517,16 +517,18 @@ async def upload_invers(stage_name: str = Form(...), province_id: int = Form(1),
               deliniasi, catatan_katalog, pengusul, tahap))
         inserted_count += 1
         
-    log_activity(
-        username="Admin",
-        action="UPLOAD_INVERS",
-        entity_type="INVERS",
-        entity_name=stage_name,
-        details=f"Unggah data INVERS '{stage_name}': {inserted_count} baris data (Revisi #{next_rev_num})"
-    )
-    
-    conn.commit()
-    conn.close()
+    try:
+        log_activity(
+            username="Admin",
+            action="UPLOAD_INVERS",
+            entity_type="INVERS",
+            entity_name=stage_name,
+            details=f"Unggah data INVERS '{stage_name}': {inserted_count} baris data (Revisi #{next_rev})"
+        )
+        
+        conn.commit()
+    finally:
+        conn.close()
     
     return {
         "stage_id": stage_id,
