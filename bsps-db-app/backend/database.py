@@ -78,7 +78,7 @@ class TursoCursor:
         for res in data.get("results", []):
             if res.get("type") == "error":
                 raise Exception(f"Turso SQL Error: {res.get('error', {}).get('message')}")
-            if res.get("type") == "ok":
+            if res.get("type") == "ok" and res.get("response", {}).get("type") == "execute":
                 result = res.get("response", {}).get("result", {})
                 cols = [c["name"] for c in result.get("cols", [])]
                 self.description = [(c, None, None, None, None, None, None) for c in cols]
