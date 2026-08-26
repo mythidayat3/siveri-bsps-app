@@ -509,13 +509,37 @@ def init_db():
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """)
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_village_codes_clean ON village_codes(clean_kab, clean_kec, clean_desa);")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_village_codes_lookup ON village_codes(kabupaten_kota, kecamatan, desa_kelurahan);")
+    # --- DATABASE INDEXES FOR TURSO CLOUD & LOCAL OPTIMIZATION (Up to 99% Rows Read reduction) ---
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_invers_records_rev ON invers_records(revision_id);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_invers_records_nik ON invers_records(no_ktp);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_invers_records_kk ON invers_records(no_kk);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_invers_records_nama ON invers_records(nama);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_invers_records_rev_geo ON invers_records(revision_id, kabupaten_kota);")
+    
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_invers_revisions_stage ON invers_revisions(stage_id, is_active);")
+    
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_verified_records_batch ON verified_records(batch_id);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_verified_records_nik ON verified_records(no_ktp);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_verified_records_kk ON verified_records(no_kk);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_verified_records_nama ON verified_records(nama);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_verified_records_batch_status ON verified_records(batch_id, status, kabupaten_kota);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_verified_records_geo ON verified_records(kabupaten_kota, kecamatan, desa_kelurahan, status);")
+    
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_verified_batches_stage ON verified_batches(stage_id, batch_type);")
+    
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_reconciliation_stage_ktp ON reconciliation_overrides(stage_id, original_no_ktp);")
+    
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_sk_records_batch ON sk_dirjen_records(batch_id);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_sk_records_nik ON sk_dirjen_records(no_ktp);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_sk_batches_stage ON sk_dirjen_batches(province_id, stage_name);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_sk_matches_sk ON sk_dirjen_matches(sk_record_id);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_sk_matches_verified ON sk_dirjen_matches(verified_record_id);")
+    
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_replacement_disq ON replacement_events(disqualified_record_id);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_invers_manual_pairs_stage ON invers_manual_pairs(stage_id);")
+    
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_village_codes_clean ON village_codes(clean_kab, clean_kec, clean_desa);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_village_codes_lookup ON village_codes(kabupaten_kota, kecamatan, desa_kelurahan);")
 
     conn.commit()
     conn.close()
