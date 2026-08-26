@@ -3,10 +3,174 @@ import os
 import requests
 import json
 import base64
+import re
+try:
+    import psycopg2
+    import psycopg2.extras
+except ImportError:
+    psycopg2 = None
 
 DB_PATH = os.getenv("DATABASE_PATH") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "bsps_db.sqlite")
+SUPABASE_DATABASE_URL = os.getenv("SUPABASE_DATABASE_URL") or os.getenv("DATABASE_URL")
 TURSO_DATABASE_URL = os.getenv("TURSO_DATABASE_URL") or os.getenv("TURSO_URL")
 TURSO_AUTH_TOKEN = os.getenv("TURSO_AUTH_TOKEN") or os.getenv("TURSO_TOKEN")
+
+def translate_sqlite_to_pg(sql):
+    if not sql:
+        return sql
+    
+    # 0. Replace AUTOINCREMENT / DDL keywords for Postgres
+    sql_t = re.sub(r'\bINTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT\b', 'SERIAL PRIMARY KEY', sql, flags=re.IGNORECASE)
+    sql_t = re.sub(r'\bAUTOINCREMENT\b', '', sql_t, flags=re.IGNORECASE)
+    
+    # 1. Replace IFNULL with COALESCE
+    sql_t = re.sub(r'\bIFNULL\b', 'COALESCE', sql_t, flags=re.IGNORECASE)
+    
+    # 2. Replace ? with %s when not inside quotes
+    parts = []
+    in_single_quote = False
+    in_double_quote = False
+    i = 0
+    while i < len(sql_t):
+        ch = sql_t[i]
+        if ch == "'" and not in_double_quote:
+            in_single_quote = not in_single_quote
+            parts.append(ch)
+        elif ch == '"' and not in_single_quote:
+            in_double_quote = not in_double_quote
+            parts.append(ch)
+        elif ch == '?' and not in_single_quote and not in_double_quote:
+            parts.append('%s')
+        else:
+            parts.append(ch)
+        i += 1
+    sql_t = "".join(parts)
+    
+    # 3. Handle INSERT OR IGNORE
+    if re.search(r'\bINSERT\s+OR\s+IGNORE\s+INTO\b', sql_t, flags=re.IGNORECASE):
+        sql_t = re.sub(r'\bINSERT\s+OR\s+IGNORE\s+INTO\b', 'INSERT INTO', sql_t, flags=re.IGNORECASE)
+        if not re.search(r'\bON\s+CONFLICT\b', sql_t, flags=re.IGNORECASE):
+            sql_t = sql_t.rstrip().rstrip(';') + " ON CONFLICT DO NOTHING;"
+
+    # 4. Handle PRAGMA (ignore)
+    if sql_t.strip().upper().startswith("PRAGMA"):
+        return "SELECT 1;"
+
+    return sql_t
+
+class PostgresRow(dict):
+    """Row object supporting both dictionary key access (case-insensitive) and integer index access."""
+    def __init__(self, cols, vals):
+        super().__init__()
+        self._cols = cols
+        self._vals = vals
+        for c, v in zip(cols, vals):
+            self[c] = v
+            
+    def __getitem__(self, item):
+        if isinstance(item, int):
+            return self._vals[item]
+        if isinstance(item, str) and item not in self:
+            for k in self.keys():
+                if k.lower() == item.lower():
+                    return self[k]
+        return super().__getitem__(item)
+        
+    def get(self, k, default=None):
+        if k in self:
+            return self[k]
+        for key in self.keys():
+            if key.lower() == str(k).lower():
+                return self[key]
+        return default
+        
+    def keys(self):
+        return self._cols
+
+class PostgresCursor:
+    def __init__(self, raw_cursor):
+        self._cur = raw_cursor
+        self.description = None
+        self.lastrowid = None
+        self.rowcount = 0
+
+    def execute(self, sql, params=None):
+        pg_sql = translate_sqlite_to_pg(sql)
+        if params is not None:
+            if isinstance(params, (list, tuple)):
+                clean_params = tuple(None if p is None else p for p in params)
+            elif isinstance(params, dict):
+                clean_params = params
+            else:
+                clean_params = (params,)
+            self._cur.execute(pg_sql, clean_params)
+        else:
+            self._cur.execute(pg_sql)
+
+        self.description = self._cur.description
+        self.rowcount = self._cur.rowcount
+        return self
+
+    def executemany(self, sql, seq_of_params):
+        pg_sql = translate_sqlite_to_pg(sql)
+        self._cur.executemany(pg_sql, seq_of_params)
+        self.description = self._cur.description
+        self.rowcount = self._cur.rowcount
+        return self
+
+    def fetchone(self):
+        row = self._cur.fetchone()
+        if row is None:
+            return None
+        cols = [d[0] for d in self._cur.description]
+        vals = list(row)
+        return PostgresRow(cols, vals)
+
+    def fetchall(self):
+        rows = self._cur.fetchall()
+        if not rows:
+            return []
+        cols = [d[0] for d in self._cur.description]
+        return [PostgresRow(cols, list(r)) for r in rows]
+
+    def close(self):
+        try:
+            self._cur.close()
+        except Exception:
+            pass
+
+class PostgresConnection:
+    def __init__(self, db_url):
+        if psycopg2 is None:
+            raise ImportError("psycopg2 is not installed. Please run: pip install psycopg2-binary")
+        self._conn = psycopg2.connect(db_url)
+        self._conn.autocommit = True
+        self.row_factory = None
+
+    def cursor(self):
+        return PostgresCursor(self._conn.cursor())
+
+    def execute(self, sql, params=None):
+        cur = self.cursor()
+        return cur.execute(sql, params)
+
+    def commit(self):
+        try:
+            self._conn.commit()
+        except Exception:
+            pass
+
+    def rollback(self):
+        try:
+            self._conn.rollback()
+        except Exception:
+            pass
+
+    def close(self):
+        try:
+            self._conn.close()
+        except Exception:
+            pass
 
 class TursoRow(dict):
     """Row object supporting both dictionary key access and integer index access."""
@@ -61,45 +225,73 @@ class TursoCursor:
             if isinstance(params, (list, tuple)):
                 args = [self._convert_val(p) for p in params]
             elif isinstance(params, dict):
-                args = {k: self._convert_val(v) for k, v in params.items()}
-                
+                args = [self._convert_val(v) for v in params.values()]
+            else:
+                args = [self._convert_val(params)]
+
         payload = {
             "requests": [
-                {"type": "execute", "stmt": {"sql": sql, "args": args}},
+                {
+                    "type": "execute",
+                    "stmt": {
+                        "sql": sql,
+                        "args": args
+                    }
+                },
                 {"type": "close"}
             ]
         }
-        
-        resp = self.conn._session.post(self.conn._url, json=payload, timeout=60)
-        if resp.status_code != 200:
-            raise Exception(f"Turso HTTP {resp.status_code}: {resp.text}")
-        data = resp.json()
-        
-        for res in data.get("results", []):
-            if res.get("type") == "error":
-                raise Exception(f"Turso SQL Error: {res.get('error', {}).get('message')}")
-            if res.get("type") == "ok" and res.get("response", {}).get("type") == "execute":
-                result = res.get("response", {}).get("result", {})
-                cols = [c["name"] for c in result.get("cols", [])]
+
+        try:
+            resp = self.conn._session.post(
+                self.conn._url,
+                json=payload,
+                timeout=30
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            
+            results = data.get("results", [])
+            exec_res = None
+            for res in results:
+                if res.get("response", {}).get("type") == "execute":
+                    exec_res = res.get("response", {}).get("result", {})
+                    break
+                if "error" in res:
+                    raise Exception(f"Turso SQL Error: {res.get('error', {}).get('message')}")
+            
+            if exec_res:
+                cols = [c["name"] for c in exec_res.get("cols", [])]
                 self.description = [(c, None, None, None, None, None, None) for c in cols]
-                self.lastrowid = result.get("last_insert_rowid")
-                self.rowcount = result.get("affected_row_count", 0)
+                self.lastrowid = exec_res.get("last_insert_rowid")
+                self.rowcount = exec_res.get("affected_row_count", 0)
                 
-                rows_raw = result.get("rows", [])
+                rows_data = exec_res.get("rows", [])
                 self._rows = []
-                for r in rows_raw:
-                    vals = []
-                    for cell in r:
-                        ctype = cell.get("type")
-                        if ctype == "null": vals.append(None)
-                        elif ctype == "integer": vals.append(int(cell["value"]))
-                        elif ctype == "float": vals.append(float(cell["value"]))
-                        elif ctype == "blob":
-                            vals.append(base64.b64decode(cell["base64"]))
-                        else: vals.append(cell.get("value"))
-                    self._rows.append(TursoRow(cols, vals))
+                for r in rows_data:
+                    row_vals = []
+                    for col_val in r:
+                        t = col_val.get("type")
+                        v = col_val.get("value")
+                        if t == "null" or v is None:
+                            row_vals.append(None)
+                        elif t == "integer":
+                            row_vals.append(int(v))
+                        elif t == "float":
+                            row_vals.append(float(v))
+                        elif t == "blob":
+                            row_vals.append(base64.b64decode(col_val.get("base64", "")))
+                        else:
+                            row_vals.append(v)
+                    self._rows.append(TursoRow(cols, row_vals))
                 self._idx = 0
-        return self
+            else:
+                self._rows = []
+                self._idx = 0
+                
+            return self
+        except Exception as e:
+            raise Exception(f"Turso HTTP Execution Error: {str(e)}")
 
     def executemany(self, sql, seq_of_params):
         for params in seq_of_params:
@@ -150,6 +342,8 @@ class TursoConnection:
         pass
 
 def get_db_connection():
+    if SUPABASE_DATABASE_URL:
+        return PostgresConnection(SUPABASE_DATABASE_URL)
     if TURSO_DATABASE_URL and TURSO_AUTH_TOKEN:
         return TursoConnection(TURSO_DATABASE_URL, TURSO_AUTH_TOKEN)
         
@@ -164,6 +358,8 @@ def get_db_connection():
     return conn
 
 def init_db():
+    if SUPABASE_DATABASE_URL or (TURSO_DATABASE_URL and TURSO_AUTH_TOKEN):
+        return
     conn = get_db_connection()
     cursor = conn.cursor()
     
