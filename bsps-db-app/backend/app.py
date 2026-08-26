@@ -1844,50 +1844,80 @@ def save_reconciliation_override(
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
+        orig_nik = original_no_ktp.strip()
+        if orig_nik.endswith('.0'): orig_nik = orig_nik[:-2]
+
+        clean_corr_nik = corrected_no_ktp.strip() if corrected_no_ktp else None
+        if clean_corr_nik and clean_corr_nik.endswith('.0'): clean_corr_nik = clean_corr_nik[:-2]
+
+        clean_corr_nama = corrected_nama.strip().upper() if corrected_nama else None
+
+        clean_corr_kk = corrected_no_kk.strip() if corrected_no_kk else None
+        if clean_corr_kk and clean_corr_kk.endswith('.0'): clean_corr_kk = clean_corr_kk[:-2]
+
         cursor.execute("""
             INSERT OR REPLACE INTO reconciliation_overrides (
                 stage_id, original_no_ktp, override_type, corrected_nama, corrected_no_ktp, corrected_no_kk
             ) VALUES (?, ?, ?, ?, ?, ?)
-        """, (stage_id, original_no_ktp, override_type, corrected_nama, corrected_no_ktp, corrected_no_kk))
+        """, (stage_id, orig_nik, override_type, clean_corr_nama, clean_corr_nik, clean_corr_kk))
 
-        # Sinkronisasi Data INVERS jika memilih 'ACCEPT_VERIFIED' atau 'MANUAL_EDIT'
+        # Sinkronisasi Data Lapangan (verified_records) & Data Rujukan (invers_records)
         if override_type in ('ACCEPT_VERIFIED', 'MANUAL_EDIT'):
             cursor.execute("""
                 SELECT vr.id, vr.nama, vr.no_ktp, vr.no_kk, vr.desa_kelurahan
                 FROM verified_records vr
                 JOIN verified_batches vb ON vb.id = vr.batch_id
                 WHERE vb.stage_id = ? AND vr.no_ktp = ?
-            """, (stage_id, original_no_ktp))
+                LIMIT 1
+            """, (stage_id, orig_nik))
             v_rec = cursor.fetchone()
             
-            if v_rec:
-                target_nik = corrected_no_ktp if (override_type == 'MANUAL_EDIT' and corrected_no_ktp) else v_rec['no_ktp']
-                target_nama = corrected_nama if (override_type == 'MANUAL_EDIT' and corrected_nama) else v_rec['nama']
-                target_kk = corrected_no_kk if (override_type == 'MANUAL_EDIT' and corrected_no_kk) else v_rec['no_kk']
-                
-                # Cari data rujukan di INVERS yang cocok berdasarkan Nama + Desa atau KK atau NIK lama
+            target_nik = clean_corr_nik if (override_type == 'MANUAL_EDIT' and clean_corr_nik) else (v_rec['no_ktp'] if v_rec else orig_nik)
+            target_nama = clean_corr_nama if (override_type == 'MANUAL_EDIT' and clean_corr_nama) else (v_rec['nama'] if v_rec else None)
+            target_kk = clean_corr_kk if (override_type == 'MANUAL_EDIT' and clean_corr_kk) else (v_rec['no_kk'] if v_rec else None)
+
+            # 1. Update verified_records agar data lapangan langsung menggunakan NIK/Nama/KK perbaikan
+            if override_type == 'MANUAL_EDIT':
                 cursor.execute("""
-                    SELECT ir.id FROM invers_records ir
-                    JOIN invers_revisions irv ON ir.revision_id = irv.id
-                    WHERE irv.stage_id = ? AND irv.is_active = 1
-                      AND (ir.no_ktp = ? OR (UPPER(ir.nama) = UPPER(?) AND UPPER(ir.desa_kelurahan) = UPPER(?)) OR ir.no_kk = ?)
-                    LIMIT 1
-                """, (stage_id, original_no_ktp, target_nama, (v_rec['desa_kelurahan'] or '').strip(), target_kk))
-                inv_match = cursor.fetchone()
-                
-                if inv_match:
-                    cursor.execute("""
-                        UPDATE invers_records 
-                        SET no_ktp = ?, nama = ?, no_kk = ?
-                        WHERE id = ?
-                    """, (target_nik, target_nama, target_kk, inv_match['id']))
+                    UPDATE verified_records
+                    SET no_ktp = COALESCE(?, no_ktp),
+                        nama = COALESCE(?, nama),
+                        no_kk = COALESCE(?, no_kk)
+                    WHERE batch_id IN (SELECT id FROM verified_batches WHERE stage_id = ?)
+                      AND no_ktp = ?
+                """, (clean_corr_nik, clean_corr_nama, clean_corr_kk, stage_id, orig_nik))
+            
+            # 2. Cari data rujukan di INVERS yang cocok dan sinkronkan agar status INVERS menjadi Terverifikasi
+            desa_verif = (v_rec['desa_kelurahan'] or '').strip() if v_rec else ''
+            cursor.execute("""
+                SELECT ir.id FROM invers_records ir
+                JOIN invers_revisions irv ON ir.revision_id = irv.id
+                WHERE irv.stage_id = ? AND irv.is_active = 1
+                  AND (ir.no_ktp = ? OR ir.no_ktp = ? OR (UPPER(TRIM(ir.nama)) = UPPER(TRIM(?)) AND UPPER(TRIM(COALESCE(ir.desa_kelurahan, ''))) = UPPER(TRIM(COALESCE(?, '')))) OR (ir.no_kk = ? AND ir.no_kk != ''))
+                LIMIT 1
+            """, (stage_id, target_nik, orig_nik, target_nama or '', desa_verif, target_kk or ''))
+            inv_match = cursor.fetchone()
+            
+            if inv_match:
+                cursor.execute("""
+                    UPDATE invers_records 
+                    SET no_ktp = COALESCE(?, no_ktp),
+                        nama = COALESCE(?, nama),
+                        no_kk = COALESCE(?, no_kk)
+                    WHERE id = ?
+                """, (target_nik, target_nama, target_kk, inv_match['id']))
+
+            log_activity(
+                username="Admin",
+                action="RECONCILE_OVERRIDE",
+                entity_type="RECONCILIATION",
+                entity_name=f"Stage {stage_id}",
+                details=f"Koreksi rekonsiliasi NIK {orig_nik} -> Target NIK: {target_nik}, Nama: {target_nama}, KK: {target_kk}"
+            )
 
         conn.commit()
-    except Exception as e:
+    finally:
         conn.close()
-        raise HTTPException(status_code=400, detail=f"Gagal menyimpan perbaikan: {str(e)}")
-        
-    conn.close()
     return {"message": "Perbaikan rekonsiliasi berhasil disimpan"}
 
 # --- ENDPOINT BARU UNTUK DASHBOARD PROGRESS BAR & OVERVIEW CENTER ---
