@@ -1,9 +1,158 @@
 import sqlite3
 import os
+import requests
+import json
+import base64
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bsps_db.sqlite")
+DB_PATH = os.getenv("DATABASE_PATH") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "bsps_db.sqlite")
+TURSO_DATABASE_URL = os.getenv("TURSO_DATABASE_URL") or os.getenv("TURSO_URL")
+TURSO_AUTH_TOKEN = os.getenv("TURSO_AUTH_TOKEN") or os.getenv("TURSO_TOKEN")
+
+class TursoRow(dict):
+    """Row object supporting both dictionary key access and integer index access."""
+    def __init__(self, cols, vals):
+        super().__init__()
+        self._cols = cols
+        self._vals = vals
+        for c, v in zip(cols, vals):
+            self[c] = v
+            
+    def __getitem__(self, item):
+        if isinstance(item, int):
+            return self._vals[item]
+        return super().__getitem__(item)
+        
+    def get(self, k, default=None):
+        return super().get(k, default)
+        
+    def keys(self):
+        return self._cols
+
+class TursoCursor:
+    def __init__(self, conn):
+        self.conn = conn
+        self.description = None
+        self.lastrowid = None
+        self.rowcount = 0
+        self._rows = []
+        self._idx = 0
+
+    def _convert_val(self, val):
+        if val is None:
+            return {"type": "null"}
+        elif isinstance(val, bool):
+            return {"type": "integer", "value": "1" if val else "0"}
+        elif isinstance(val, int):
+            return {"type": "integer", "value": str(val)}
+        elif isinstance(val, float):
+            return {"type": "float", "value": val}
+        elif isinstance(val, bytes):
+            return {"type": "blob", "base64": base64.b64encode(val).decode('utf-8')}
+        else:
+            return {"type": "text", "value": str(val)}
+
+    def execute(self, sql, params=None):
+        sql = sql.strip()
+        if not sql:
+            return self
+            
+        args = []
+        if params is not None:
+            if isinstance(params, (list, tuple)):
+                args = [self._convert_val(p) for p in params]
+            elif isinstance(params, dict):
+                args = {k: self._convert_val(v) for k, v in params.items()}
+                
+        payload = {
+            "requests": [
+                {"type": "execute", "stmt": {"sql": sql, "args": args}},
+                {"type": "close"}
+            ]
+        }
+        
+        resp = self.conn._session.post(self.conn._url, json=payload, timeout=60)
+        if resp.status_code != 200:
+            raise Exception(f"Turso HTTP {resp.status_code}: {resp.text}")
+        data = resp.json()
+        
+        for res in data.get("results", []):
+            if res.get("type") == "error":
+                raise Exception(f"Turso SQL Error: {res.get('error', {}).get('message')}")
+            if res.get("type") == "ok":
+                result = res.get("response", {}).get("result", {})
+                cols = [c["name"] for c in result.get("cols", [])]
+                self.description = [(c, None, None, None, None, None, None) for c in cols]
+                self.lastrowid = result.get("last_insert_rowid")
+                self.rowcount = result.get("affected_row_count", 0)
+                
+                rows_raw = result.get("rows", [])
+                self._rows = []
+                for r in rows_raw:
+                    vals = []
+                    for cell in r:
+                        ctype = cell.get("type")
+                        if ctype == "null": vals.append(None)
+                        elif ctype == "integer": vals.append(int(cell["value"]))
+                        elif ctype == "float": vals.append(float(cell["value"]))
+                        elif ctype == "blob":
+                            vals.append(base64.b64decode(cell["base64"]))
+                        else: vals.append(cell.get("value"))
+                    self._rows.append(TursoRow(cols, vals))
+                self._idx = 0
+        return self
+
+    def executemany(self, sql, seq_of_params):
+        for params in seq_of_params:
+            self.execute(sql, params)
+        return self
+
+    def fetchone(self):
+        if self._idx < len(self._rows):
+            row = self._rows[self._idx]
+            self._idx += 1
+            return row
+        return None
+
+    def fetchall(self):
+        rows = self._rows[self._idx:]
+        self._idx = len(self._rows)
+        return rows
+
+class TursoConnection:
+    def __init__(self, url, token):
+        self._raw_url = url
+        clean_url = url.replace("libsql://", "https://").rstrip("/")
+        if not clean_url.endswith("/v2/pipeline"):
+            clean_url = f"{clean_url}/v2/pipeline"
+        self._url = clean_url
+        self._token = token
+        self._session = requests.Session()
+        self._session.headers.update({
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        })
+        self.row_factory = None
+
+    def cursor(self):
+        return TursoCursor(self)
+
+    def execute(self, sql, params=None):
+        cur = self.cursor()
+        return cur.execute(sql, params)
+
+    def commit(self):
+        pass
+
+    def rollback(self):
+        pass
+
+    def close(self):
+        pass
 
 def get_db_connection():
+    if TURSO_DATABASE_URL and TURSO_AUTH_TOKEN:
+        return TursoConnection(TURSO_DATABASE_URL, TURSO_AUTH_TOKEN)
+        
     conn = sqlite3.connect(DB_PATH, timeout=60.0)
     conn.row_factory = sqlite3.Row
     try:
