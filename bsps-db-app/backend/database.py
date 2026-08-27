@@ -99,6 +99,9 @@ class PostgresCursor:
 
     def execute(self, sql, params=None):
         pg_sql = translate_sqlite_to_pg(sql)
+        is_insert = pg_sql.strip().upper().startswith("INSERT INTO") and "RETURNING" not in pg_sql.upper()
+        try_sql = pg_sql.rstrip(";") + " RETURNING id" if is_insert else pg_sql
+        
         try:
             if params is not None:
                 if isinstance(params, (list, tuple)):
@@ -107,9 +110,31 @@ class PostgresCursor:
                     clean_params = params
                 else:
                     clean_params = (params,)
-                self._cur.execute(pg_sql, clean_params)
+                try:
+                    self._cur.execute(try_sql, clean_params)
+                except Exception as e:
+                    if is_insert and ("column \"id\" does not exist" in str(e).lower() or "syntax error" in str(e).lower()):
+                        self._cur.connection.rollback()
+                        self._cur.execute(pg_sql, clean_params)
+                    else:
+                        raise e
             else:
-                self._cur.execute(pg_sql)
+                try:
+                    self._cur.execute(try_sql)
+                except Exception as e:
+                    if is_insert and ("column \"id\" does not exist" in str(e).lower() or "syntax error" in str(e).lower()):
+                        self._cur.connection.rollback()
+                        self._cur.execute(pg_sql)
+                    else:
+                        raise e
+
+            if is_insert and self._cur.description:
+                try:
+                    res = self._cur.fetchone()
+                    if res:
+                        self.lastrowid = res[0]
+                except Exception:
+                    pass
         except Exception as e:
             try:
                 self._cur.connection.rollback()
