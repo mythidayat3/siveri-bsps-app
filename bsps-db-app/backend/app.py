@@ -40,9 +40,11 @@ def find_header_and_data(sheet):
     header_row_idx = None
     headers = []
     rows = list(sheet.iter_rows(values_only=True))
-    for r_idx, row in enumerate(rows):
+    for r_idx, row in enumerate(rows[:30]):
         cleaned_cells = [str(c).strip().replace('\n', ' ').upper() if c is not None else '' for c in row]
-        if 'NAMA' in cleaned_cells and any('KTP' in c or 'NIK' in c or 'KARTU' in c for c in cleaned_cells):
+        has_nama = any('NAMA' in c for c in cleaned_cells)
+        has_id = any(any(term in c for term in ['KTP', 'NIK', 'KARTU', 'KK', 'IDENTITAS']) for c in cleaned_cells)
+        if has_nama and has_id:
             header_row_idx = r_idx
             prev_row = rows[r_idx-1] if r_idx > 0 else []
             headers = []
@@ -57,7 +59,7 @@ def find_header_and_data(sheet):
     if header_row_idx is not None:
         data_rows = []
         for row in rows[header_row_idx+1:]:
-            if any(c is not None for c in row):
+            if any(c is not None and str(c).strip() for c in row):
                 data_rows.append(row)
         return headers, data_rows, header_row_idx
     return None, None, None
@@ -419,47 +421,70 @@ async def upload_invers(stage_name: str = Form(...), province_id: int = Form(1),
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Gagal membaca file Excel: {str(e)}")
     
-    sheet = wb.active
-    headers, data, header_row_idx = find_header_and_data(sheet)
+    # Cek seluruh sheet untuk menemukan sheet yang berisi baris header dan data CPB
+    sheet_candidates = [wb.active] + [s for s in wb.worksheets if s != wb.active]
+    headers, data, header_row_idx = None, None, None
+    for ws in sheet_candidates:
+        h, d, r_idx = find_header_and_data(ws)
+        if h is not None and d is not None and len(d) > 0:
+            headers, data, header_row_idx = h, d, r_idx
+            break
+        elif h is not None and headers is None:
+            headers, data, header_row_idx = h, d, r_idx
+
     if headers is None:
-        raise HTTPException(status_code=400, detail="Tidak dapat menemukan baris header yang berisi 'NAMA' dan 'NO KTP/NIK'")
+        raise HTTPException(
+            status_code=400,
+            detail="Tidak dapat menemukan baris header yang berisi kolom 'Nama' dan 'No KTP/NIK/KK'. Pastikan format kolom sesuai dengan template."
+        )
+
+    if not data or len(data) == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="File Excel berhasil dibaca baris headernya, namun tidak ada baris data CPB di bawah header. Pastikan file Excel sudah diisi dengan data penerima bantuan sebelum diunggah."
+        )
     
     header_map = {}
     for idx, h in enumerate(headers):
-        h_upper = h.upper().replace(' ', '')
-        if 'NAMA' in h_upper and 'PENGGANTI' not in h_upper:
+        h_upper = re.sub(r'[^A-Z0-9]', '', h.upper())
+        if 'NAMA' in h_upper and 'PENGGANTI' not in h_upper and 'nama' not in header_map:
             header_map['nama'] = idx
-        elif 'KTP' in h_upper or 'NIK' in h_upper:
+        elif ('KTP' in h_upper or 'NIK' in h_upper) and 'PENGGANTI' not in h_upper and 'no_ktp' not in header_map:
             header_map['no_ktp'] = idx
-        elif 'KK' in h_upper or 'KELUARGA' in h_upper:
+        elif ('KK' in h_upper or 'KELUARGA' in h_upper) and 'PENGGANTI' not in h_upper and 'no_kk' not in header_map:
             header_map['no_kk'] = idx
-        elif 'DESA' in h_upper and 'KODE' in h_upper:
+        elif ('KODEDESA' in h_upper or 'KODEKEL' in h_upper or 'KODEWIL' in h_upper or ('KODE' in h_upper and 'DESA' in h_upper)) and 'kode_desa' not in header_map:
             header_map['kode_desa'] = idx
-        elif 'DESA' in h_upper or 'KELURAHAN' in h_upper:
+        elif ('DESA' in h_upper or 'KELURAHAN' in h_upper) and 'KODE' not in h_upper and 'desa_kelurahan' not in header_map:
             header_map['desa_kelurahan'] = idx
-        elif 'KECAMATAN' in h_upper:
+        elif 'KECAMATAN' in h_upper and 'kecamatan' not in header_map:
             header_map['kecamatan'] = idx
-        elif 'KABUPATEN' in h_upper or 'KOTA' in h_upper:
+        elif ('KABUPATEN' in h_upper or 'KOTA' in h_upper or h_upper.startswith('KAB')) and 'kabupaten_kota' not in header_map:
             header_map['kabupaten_kota'] = idx
-        elif 'ALAMAT' in h_upper:
+        elif 'ALAMAT' in h_upper and 'alamat' not in header_map:
             header_map['alamat'] = idx
-        elif 'PROVINSI' in h_upper:
+        elif 'PROVINSI' in h_upper and 'provinsi' not in header_map:
             header_map['provinsi'] = idx
-        elif 'DELINIASI' in h_upper:
+        elif ('DELINIASI' in h_upper or 'DELINEASI' in h_upper) and 'deliniasi' not in header_map:
             header_map['deliniasi'] = idx
-        elif 'CATATAN' in h_upper or 'KATALOG' in h_upper:
+        elif ('CATATAN' in h_upper or 'KATALOG' in h_upper) and 'catatan_katalog' not in header_map:
             header_map['catatan_katalog'] = idx
-        elif 'PENGGUSUL' in h_upper or 'PENGUSUL' in h_upper:
+        elif ('PENGUSUL' in h_upper or 'PENGGUSUL' in h_upper or 'ASPIRASI' in h_upper) and 'pengusul' not in header_map:
             header_map['pengusul'] = idx
-        elif 'TAHAP' in h_upper:
+        elif 'TAHAP' in h_upper and 'tahap' not in header_map:
             header_map['tahap'] = idx
-        elif 'URUT' in h_upper or h_upper == 'NO':
+        elif ('JENIS' in h_upper or 'KELAMIN' in h_upper or h_upper in ['JK', 'LP', 'SEX']) and 'jenis_kelamin' not in header_map:
+            header_map['jenis_kelamin'] = idx
+        elif ('URUT' in h_upper or h_upper in ['NO', 'NOMOR', 'NOURUT']) and 'no_urut' not in header_map:
             header_map['no_urut'] = idx
             
     required_cols = ['nama', 'no_ktp', 'no_kk']
     missing_cols = [c for c in required_cols if c not in header_map]
     if missing_cols:
-        raise HTTPException(status_code=400, detail=f"Kolom wajib tidak ditemukan di sheet: {', '.join(missing_cols)}")
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Kolom wajib tidak terdeteksi di sheet: {', '.join(missing_cols)}. Pastikan kolom Nama, No KTP / NIK, dan No KK tersedia di tabel."
+        )
         
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -491,10 +516,10 @@ async def upload_invers(stage_name: str = Form(...), province_id: int = Form(1),
     for row in data:
         no_urut = row[header_map.get('no_urut')] if 'no_urut' in header_map and header_map['no_urut'] < len(row) else None
         kode_desa = str(row[header_map.get('kode_desa')]).strip() if 'kode_desa' in header_map and header_map['kode_desa'] < len(row) and row[header_map['kode_desa']] is not None else None
-        nama = str(row[header_map.get('nama')]).strip() if row[header_map['nama']] is not None else ""
+        nama = str(row[header_map.get('nama')]).strip() if 'nama' in header_map and header_map['nama'] < len(row) and row[header_map['nama']] is not None else ""
         jenis_kelamin = str(row[header_map.get('jenis_kelamin')]).strip() if 'jenis_kelamin' in header_map and header_map['jenis_kelamin'] < len(row) and row[header_map['jenis_kelamin']] is not None else None
-        no_ktp = str(row[header_map.get('no_ktp')]).strip() if row[header_map['no_ktp']] is not None else ""
-        no_kk = str(row[header_map.get('no_kk')]).strip() if row[header_map['no_kk']] is not None else ""
+        no_ktp = str(row[header_map.get('no_ktp')]).strip() if 'no_ktp' in header_map and header_map['no_ktp'] < len(row) and row[header_map['no_ktp']] is not None else ""
+        no_kk = str(row[header_map.get('no_kk')]).strip() if 'no_kk' in header_map and header_map['no_kk'] < len(row) and row[header_map['no_kk']] is not None else ""
         alamat = str(row[header_map.get('alamat')]).strip() if 'alamat' in header_map and header_map['alamat'] < len(row) and row[header_map['alamat']] is not None else None
         desa_kelurahan = str(row[header_map.get('desa_kelurahan')]).strip() if 'desa_kelurahan' in header_map and header_map['desa_kelurahan'] < len(row) and row[header_map['desa_kelurahan']] is not None else None
         kecamatan = str(row[header_map.get('kecamatan')]).strip() if 'kecamatan' in header_map and header_map['kecamatan'] < len(row) and row[header_map['kecamatan']] is not None else None
@@ -512,8 +537,8 @@ async def upload_invers(stage_name: str = Form(...), province_id: int = Form(1),
             continue
 
         key_all = (nama, no_ktp, no_kk)
-        if no_ktp in [k[1] for k in seen_in_file] or no_kk in [k[2] for k in seen_in_file]:
-            duplicate_warnings.append(f"Duplikat ditemukan di file: {nama} (NIK: {no_ktp}, KK: {no_kk})")
+        if no_ktp and no_ktp in [k[1] for k in seen_in_file]:
+            duplicate_warnings.append(f"Duplikat ditemukan di file: {nama} (NIK: {no_ktp})")
         seen_in_file.add(key_all)
 
         cursor.execute("""
@@ -539,6 +564,12 @@ async def upload_invers(stage_name: str = Form(...), province_id: int = Form(1),
         conn.commit()
     finally:
         conn.close()
+
+    if inserted_count == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Tidak ada data CPB yang berhasil dibaca dari baris data. Pastikan kolom Nama, No KTP (NIK), atau No KK pada file Excel tidak kosong."
+        )
     
     return {
         "stage_id": stage_id,
