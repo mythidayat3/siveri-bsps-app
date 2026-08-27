@@ -56,6 +56,9 @@ def translate_sqlite_to_pg(sql):
     if sql_t.strip().upper().startswith("PRAGMA"):
         return "SELECT 1;"
 
+    # 5. Handle ALTER TABLE ... ADD COLUMN -> ADD COLUMN IF NOT EXISTS
+    sql_t = re.sub(r'\bADD\s+COLUMN\s+(?!IF\s+NOT\s+EXISTS\b)', 'ADD COLUMN IF NOT EXISTS ', sql_t, flags=re.IGNORECASE)
+
     return sql_t
 
 class PostgresRow(dict):
@@ -96,16 +99,23 @@ class PostgresCursor:
 
     def execute(self, sql, params=None):
         pg_sql = translate_sqlite_to_pg(sql)
-        if params is not None:
-            if isinstance(params, (list, tuple)):
-                clean_params = tuple(None if p is None else p for p in params)
-            elif isinstance(params, dict):
-                clean_params = params
+        try:
+            if params is not None:
+                if isinstance(params, (list, tuple)):
+                    clean_params = tuple(None if p is None else p for p in params)
+                elif isinstance(params, dict):
+                    clean_params = params
+                else:
+                    clean_params = (params,)
+                self._cur.execute(pg_sql, clean_params)
             else:
-                clean_params = (params,)
-            self._cur.execute(pg_sql, clean_params)
-        else:
-            self._cur.execute(pg_sql)
+                self._cur.execute(pg_sql)
+        except Exception as e:
+            try:
+                self._cur.connection.rollback()
+            except Exception:
+                pass
+            raise e
 
         self.description = self._cur.description
         self.rowcount = self._cur.rowcount
@@ -342,10 +352,13 @@ class TursoConnection:
         pass
 
 def get_db_connection():
-    if SUPABASE_DATABASE_URL:
-        return PostgresConnection(SUPABASE_DATABASE_URL)
-    if TURSO_DATABASE_URL and TURSO_AUTH_TOKEN:
-        return TursoConnection(TURSO_DATABASE_URL, TURSO_AUTH_TOKEN)
+    supabase_url = os.getenv("SUPABASE_DATABASE_URL") or os.getenv("DATABASE_URL") or SUPABASE_DATABASE_URL
+    if supabase_url:
+        return PostgresConnection(supabase_url)
+    turso_url = os.getenv("TURSO_DATABASE_URL") or os.getenv("TURSO_URL") or TURSO_DATABASE_URL
+    turso_token = os.getenv("TURSO_AUTH_TOKEN") or os.getenv("TURSO_TOKEN") or TURSO_AUTH_TOKEN
+    if turso_url and turso_token:
+        return TursoConnection(turso_url, turso_token)
         
     conn = sqlite3.connect(DB_PATH, timeout=60.0)
     conn.row_factory = sqlite3.Row
@@ -391,34 +404,27 @@ def init_db():
 
     # Migration: add province_id to invers_stages if missing and default existing stages to 1 (SULAWESI SELATAN)
     try:
-        cursor.execute("SELECT province_id FROM invers_stages LIMIT 1")
-    except Exception:
         cursor.execute("ALTER TABLE invers_stages ADD COLUMN province_id INTEGER DEFAULT 1")
-    
-    cursor.execute("UPDATE invers_stages SET province_id = 1 WHERE province_id IS NULL OR province_id = 0")
+    except Exception:
+        pass
+    try:
+        cursor.execute("UPDATE invers_stages SET province_id = 1 WHERE province_id IS NULL OR province_id = 0")
+    except Exception:
+        pass
 
     # Migration: add surat_filename, surat_data, surat_uploaded_at to invers_stages
     try:
-        cursor.execute("SELECT surat_filename FROM invers_stages LIMIT 1")
+        cursor.execute("ALTER TABLE invers_stages ADD COLUMN surat_filename TEXT")
     except Exception:
-        try:
-            cursor.execute("ALTER TABLE invers_stages ADD COLUMN surat_filename TEXT")
-        except Exception:
-            pass
+        pass
     try:
-        cursor.execute("SELECT surat_data FROM invers_stages LIMIT 1")
+        cursor.execute("ALTER TABLE invers_stages ADD COLUMN surat_data TEXT")
     except Exception:
-        try:
-            cursor.execute("ALTER TABLE invers_stages ADD COLUMN surat_data TEXT")
-        except Exception:
-            pass
+        pass
     try:
-        cursor.execute("SELECT surat_uploaded_at FROM invers_stages LIMIT 1")
+        cursor.execute("ALTER TABLE invers_stages ADD COLUMN surat_uploaded_at TIMESTAMP")
     except Exception:
-        try:
-            cursor.execute("ALTER TABLE invers_stages ADD COLUMN surat_uploaded_at TIMESTAMP")
-        except Exception:
-            pass
+        pass
 
     conn.commit()
     
@@ -471,38 +477,35 @@ def init_db():
     )
     """)
     
-    # Migration: add is_published to existing verified_batches if missing
+    # Migration: add columns to existing verified_batches if missing
     try:
-        cursor.execute("SELECT is_published FROM verified_batches LIMIT 1")
-    except Exception:
         cursor.execute("ALTER TABLE verified_batches ADD COLUMN is_published INTEGER DEFAULT 0")
-        
-    # Migration: add nomor_ba and tanggal_ba to verified_batches if missing
-    try:
-        cursor.execute("SELECT nomor_ba FROM verified_batches LIMIT 1")
     except Exception:
+        pass
+    try:
         cursor.execute("ALTER TABLE verified_batches ADD COLUMN nomor_ba TEXT")
-    try:
-        cursor.execute("SELECT tanggal_ba FROM verified_batches LIMIT 1")
     except Exception:
+        pass
+    try:
         cursor.execute("ALTER TABLE verified_batches ADD COLUMN tanggal_ba TEXT")
-    # Migration: add sort_order to verified_batches if missing
-    try:
-        cursor.execute("SELECT sort_order FROM verified_batches LIMIT 1")
     except Exception:
+        pass
+    try:
         cursor.execute("ALTER TABLE verified_batches ADD COLUMN sort_order INTEGER DEFAULT 0")
-    try:
-        cursor.execute("SELECT batch_type FROM verified_batches LIMIT 1")
     except Exception:
+        pass
+    try:
         cursor.execute("ALTER TABLE verified_batches ADD COLUMN batch_type TEXT DEFAULT 'REGULAR'")
-    try:
-        cursor.execute("SELECT kabupaten FROM verified_batches LIMIT 1")
     except Exception:
+        pass
+    try:
         cursor.execute("ALTER TABLE verified_batches ADD COLUMN kabupaten TEXT")
-    try:
-        cursor.execute("SELECT metadata_json FROM verified_batches LIMIT 1")
     except Exception:
+        pass
+    try:
         cursor.execute("ALTER TABLE verified_batches ADD COLUMN metadata_json TEXT")
+    except Exception:
+        pass
     
     # 5. Verified Records
     cursor.execute("""
