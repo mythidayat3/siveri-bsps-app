@@ -77,10 +77,10 @@ def clean_nik(val):
 def root_health_check():
     return {"status": "ok", "message": "SiVeri BSPS Backend API Online"}
 
-def log_activity(username: str, action: str, entity_type: str = None, entity_name: str = None, details: str = None, ip_address: str = None, user_id: int = None, full_name: str = None):
-    """Log an activity to activity_logs table safely."""
+def log_activity(username: str, action: str, entity_type: str = None, entity_name: str = None, details: str = None, ip_address: str = None, user_id: int = None, full_name: str = None, db_conn = None):
+    """Log an activity to activity_logs table safely without nested connection deadlocks."""
     try:
-        conn = get_db_connection()
+        conn = db_conn or get_db_connection()
         cursor = conn.cursor()
         
         if not full_name or not user_id:
@@ -94,8 +94,9 @@ def log_activity(username: str, action: str, entity_type: str = None, entity_nam
             INSERT INTO activity_logs (user_id, username, full_name, action, entity_type, entity_name, details, ip_address)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (user_id, username, full_name or username, action, entity_type, entity_name, details, ip_address))
-        conn.commit()
-        conn.close()
+        if not db_conn:
+            conn.commit()
+            conn.close()
     except Exception as e:
         print(f"Error logging activity: {e}")
 
@@ -489,87 +490,109 @@ async def upload_invers(stage_name: str = Form(...), province_id: int = Form(1),
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT id FROM invers_stages WHERE name = ? AND province_id = ?", (stage_name, province_id))
-    stage_row = cursor.fetchone()
-    if stage_row:
-        stage_id = stage_row['id']
-    else:
-        cursor.execute("INSERT INTO invers_stages (name, province_id) VALUES (?, ?)", (stage_name, province_id))
-        stage_id = cursor.lastrowid
-        
-    cursor.execute("SELECT MAX(revision_num) as max_rev FROM invers_revisions WHERE stage_id = ?", (stage_id,))
-    rev_row = cursor.fetchone()
-    next_rev = (rev_row['max_rev'] or 0) + 1
-    
-    cursor.execute("UPDATE invers_revisions SET is_active = 0 WHERE stage_id = ?", (stage_id,))
-    
-    cursor.execute("""
-        INSERT INTO invers_revisions (stage_id, revision_num, filename, is_active)
-        VALUES (?, ?, ?, 1)
-    """, (stage_id, next_rev, file.filename))
-    revision_id = cursor.lastrowid
-    
-    inserted_count = 0
-    duplicate_warnings = []
-    seen_in_file = set()
-    
-    for row in data:
-        no_urut = row[header_map.get('no_urut')] if 'no_urut' in header_map and header_map['no_urut'] < len(row) else None
-        kode_desa = str(row[header_map.get('kode_desa')]).strip() if 'kode_desa' in header_map and header_map['kode_desa'] < len(row) and row[header_map['kode_desa']] is not None else None
-        nama = str(row[header_map.get('nama')]).strip() if 'nama' in header_map and header_map['nama'] < len(row) and row[header_map['nama']] is not None else ""
-        jenis_kelamin = str(row[header_map.get('jenis_kelamin')]).strip() if 'jenis_kelamin' in header_map and header_map['jenis_kelamin'] < len(row) and row[header_map['jenis_kelamin']] is not None else None
-        no_ktp = str(row[header_map.get('no_ktp')]).strip() if 'no_ktp' in header_map and header_map['no_ktp'] < len(row) and row[header_map['no_ktp']] is not None else ""
-        no_kk = str(row[header_map.get('no_kk')]).strip() if 'no_kk' in header_map and header_map['no_kk'] < len(row) and row[header_map['no_kk']] is not None else ""
-        alamat = str(row[header_map.get('alamat')]).strip() if 'alamat' in header_map and header_map['alamat'] < len(row) and row[header_map['alamat']] is not None else None
-        desa_kelurahan = str(row[header_map.get('desa_kelurahan')]).strip() if 'desa_kelurahan' in header_map and header_map['desa_kelurahan'] < len(row) and row[header_map['desa_kelurahan']] is not None else None
-        kecamatan = str(row[header_map.get('kecamatan')]).strip() if 'kecamatan' in header_map and header_map['kecamatan'] < len(row) and row[header_map['kecamatan']] is not None else None
-        kabupaten_kota = str(row[header_map.get('kabupaten_kota')]).strip() if 'kabupaten_kota' in header_map and header_map['kabupaten_kota'] < len(row) and row[header_map['kabupaten_kota']] is not None else None
-        provinsi = str(row[header_map.get('provinsi')]).strip() if 'provinsi' in header_map and header_map['provinsi'] < len(row) and row[header_map['provinsi']] is not None else None
-        deliniasi = str(row[header_map.get('deliniasi')]).strip() if 'deliniasi' in header_map and header_map['deliniasi'] < len(row) and row[header_map['deliniasi']] is not None else None
-        catatan_katalog = str(row[header_map.get('catatan_katalog')]).strip() if 'catatan_katalog' in header_map and header_map['catatan_katalog'] < len(row) and row[header_map['catatan_katalog']] is not None else None
-        pengusul = str(row[header_map.get('pengusul')]).strip() if 'pengusul' in header_map and header_map['pengusul'] < len(row) and row[header_map['pengusul']] is not None else None
-        tahap = str(row[header_map.get('tahap')]).strip() if 'tahap' in header_map and header_map['tahap'] < len(row) and row[header_map['tahap']] is not None else None
-
-        if no_ktp.endswith('.0'): no_ktp = no_ktp[:-2]
-        if no_kk.endswith('.0'): no_kk = no_kk[:-2]
-
-        if not nama and not no_ktp and not no_kk:
-            continue
-
-        key_all = (nama, no_ktp, no_kk)
-        if no_ktp and no_ktp in [k[1] for k in seen_in_file]:
-            duplicate_warnings.append(f"Duplikat ditemukan di file: {nama} (NIK: {no_ktp})")
-        seen_in_file.add(key_all)
-
-        cursor.execute("""
-            INSERT INTO invers_records (
-                revision_id, no_urut, kode_desa, nama, jenis_kelamin, no_ktp, no_kk,
-                alamat, desa_kelurahan, kecamatan, kabupaten_kota, provinsi,
-                deliniasi, catatan_katalog, pengusul, tahap
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (revision_id, no_urut, kode_desa, nama, jenis_kelamin, no_ktp, no_kk,
-              alamat, desa_kelurahan, kecamatan, kabupaten_kota, provinsi,
-              deliniasi, catatan_katalog, pengusul, tahap))
-        inserted_count += 1
-        
     try:
+        cursor.execute("SELECT id FROM invers_stages WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) AND (province_id = ? OR (? = 1 AND (province_id IS NULL OR province_id = 1)))", (stage_name, province_id, province_id))
+        stage_row = cursor.fetchone()
+        if stage_row:
+            stage_id = stage_row['id']
+        else:
+            try:
+                cursor.execute("INSERT INTO invers_stages (name, province_id) VALUES (?, ?)", (stage_name.strip(), province_id))
+                stage_id = cursor.lastrowid
+            except Exception:
+                cursor.execute("SELECT id FROM invers_stages WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))", (stage_name,))
+                existing_row = cursor.fetchone()
+                if existing_row:
+                    stage_id = existing_row['id']
+                    cursor.execute("UPDATE invers_stages SET province_id = ? WHERE id = ?", (province_id, stage_id))
+                else:
+                    raise
+            
+        cursor.execute("SELECT MAX(revision_num) as max_rev FROM invers_revisions WHERE stage_id = ?", (stage_id,))
+        rev_row = cursor.fetchone()
+        next_rev = (rev_row['max_rev'] or 0) + 1
+        
+        cursor.execute("UPDATE invers_revisions SET is_active = 0 WHERE stage_id = ?", (stage_id,))
+        
+        cursor.execute("""
+            INSERT INTO invers_revisions (stage_id, revision_num, filename, is_active)
+            VALUES (?, ?, ?, 1)
+        """, (stage_id, next_rev, file.filename))
+        revision_id = cursor.lastrowid
+        
+        inserted_count = 0
+        duplicate_warnings = []
+        seen_in_file = set()
+        
+        for row in data:
+            no_urut = row[header_map.get('no_urut')] if 'no_urut' in header_map and header_map['no_urut'] < len(row) else None
+            kode_desa = str(row[header_map.get('kode_desa')]).strip() if 'kode_desa' in header_map and header_map['kode_desa'] < len(row) and row[header_map['kode_desa']] is not None else None
+            nama = str(row[header_map.get('nama')]).strip() if 'nama' in header_map and header_map['nama'] < len(row) and row[header_map['nama']] is not None else ""
+            jenis_kelamin = str(row[header_map.get('jenis_kelamin')]).strip() if 'jenis_kelamin' in header_map and header_map['jenis_kelamin'] < len(row) and row[header_map['jenis_kelamin']] is not None else None
+            no_ktp = str(row[header_map.get('no_ktp')]).strip() if 'no_ktp' in header_map and header_map['no_ktp'] < len(row) and row[header_map['no_ktp']] is not None else ""
+            no_kk = str(row[header_map.get('no_kk')]).strip() if 'no_kk' in header_map and header_map['no_kk'] < len(row) and row[header_map['no_kk']] is not None else ""
+            alamat = str(row[header_map.get('alamat')]).strip() if 'alamat' in header_map and header_map['alamat'] < len(row) and row[header_map['alamat']] is not None else None
+            desa_kelurahan = str(row[header_map.get('desa_kelurahan')]).strip() if 'desa_kelurahan' in header_map and header_map['desa_kelurahan'] < len(row) and row[header_map['desa_kelurahan']] is not None else None
+            kecamatan = str(row[header_map.get('kecamatan')]).strip() if 'kecamatan' in header_map and header_map['kecamatan'] < len(row) and row[header_map['kecamatan']] is not None else None
+            kabupaten_kota = str(row[header_map.get('kabupaten_kota')]).strip() if 'kabupaten_kota' in header_map and header_map['kabupaten_kota'] < len(row) and row[header_map['kabupaten_kota']] is not None else None
+            provinsi = str(row[header_map.get('provinsi')]).strip() if 'provinsi' in header_map and header_map['provinsi'] < len(row) and row[header_map['provinsi']] is not None else None
+            deliniasi = str(row[header_map.get('deliniasi')]).strip() if 'deliniasi' in header_map and header_map['deliniasi'] < len(row) and row[header_map['deliniasi']] is not None else None
+            catatan_katalog = str(row[header_map.get('catatan_katalog')]).strip() if 'catatan_katalog' in header_map and header_map['catatan_katalog'] < len(row) and row[header_map['catatan_katalog']] is not None else None
+            pengusul = str(row[header_map.get('pengusul')]).strip() if 'pengusul' in header_map and header_map['pengusul'] < len(row) and row[header_map['pengusul']] is not None else None
+            tahap = str(row[header_map.get('tahap')]).strip() if 'tahap' in header_map and header_map['tahap'] < len(row) and row[header_map['tahap']] is not None else None
+
+            if no_ktp.endswith('.0'): no_ktp = no_ktp[:-2]
+            if no_kk.endswith('.0'): no_kk = no_kk[:-2]
+
+            if not nama and not no_ktp and not no_kk:
+                continue
+
+            key_all = (nama, no_ktp, no_kk)
+            if no_ktp and no_ktp in [k[1] for k in seen_in_file]:
+                duplicate_warnings.append(f"Duplikat ditemukan di file: {nama} (NIK: {no_ktp})")
+            seen_in_file.add(key_all)
+
+            cursor.execute("""
+                INSERT INTO invers_records (
+                    revision_id, no_urut, kode_desa, nama, jenis_kelamin, no_ktp, no_kk,
+                    alamat, desa_kelurahan, kecamatan, kabupaten_kota, provinsi,
+                    deliniasi, catatan_katalog, pengusul, tahap
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (revision_id, no_urut, kode_desa, nama, jenis_kelamin, no_ktp, no_kk,
+                  alamat, desa_kelurahan, kecamatan, kabupaten_kota, provinsi,
+                  deliniasi, catatan_katalog, pengusul, tahap))
+            inserted_count += 1
+            
+        if inserted_count == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Tidak ada data CPB yang berhasil dibaca dari baris data. Pastikan kolom Nama, No KTP (NIK), atau No KK pada file Excel tidak kosong."
+            )
+
         log_activity(
             username="Admin",
             action="UPLOAD_INVERS",
             entity_type="INVERS",
             entity_name=stage_name,
-            details=f"Unggah data INVERS '{stage_name}': {inserted_count} baris data (Revisi #{next_rev})"
+            details=f"Unggah data INVERS '{stage_name}': {inserted_count} baris data (Revisi #{next_rev})",
+            db_conn=conn
         )
         
         conn.commit()
+    except HTTPException:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"Terjadi kesalahan saat menyimpan data INVERS: {str(e)}")
     finally:
         conn.close()
-
-    if inserted_count == 0:
-        raise HTTPException(
-            status_code=400,
-            detail="Tidak ada data CPB yang berhasil dibaca dari baris data. Pastikan kolom Nama, No KTP (NIK), atau No KK pada file Excel tidak kosong."
-        )
     
     return {
         "stage_id": stage_id,
@@ -835,7 +858,8 @@ async def upload_verified(
         action="UPLOAD_VERIFIKASI",
         entity_type="VERIFIKASI",
         entity_name=batch_name,
-        details=f"Unggah batch verifikasi '{batch_name}': {stats['lolos_added']} Lolos, {stats['tidak_lolos_added']} Tidak Lolos"
+        details=f"Unggah batch verifikasi '{batch_name}': {stats['lolos_added']} Lolos, {stats['tidak_lolos_added']} Tidak Lolos",
+        db_conn=conn
     )
     
     conn.commit()
@@ -1113,7 +1137,8 @@ async def upload_verfal(
         action="UPLOAD_VERFAL",
         entity_type="VERFAL",
         entity_name=f"{kab_clean} - {batch_name}",
-        details=f"Unggah Berita Acara Verfal '{batch_name}' ({kab_clean}): {stats['lolos']} Lolos, {stats['tidak_lolos']} Tidak Lolos, {stats['replacements']} Pengganti"
+        details=f"Unggah Berita Acara Verfal '{batch_name}' ({kab_clean}): {stats['lolos']} Lolos, {stats['tidak_lolos']} Tidak Lolos, {stats['replacements']} Pengganti",
+        db_conn=conn
     )
     
     conn.commit()
@@ -1953,7 +1978,8 @@ def save_reconciliation_override(
                 action="RECONCILE_OVERRIDE",
                 entity_type="RECONCILIATION",
                 entity_name=f"Stage {stage_id}",
-                details=f"Koreksi rekonsiliasi NIK {orig_nik} -> Target NIK: {target_nik}, Nama: {target_nama}, KK: {target_kk}"
+                details=f"Koreksi rekonsiliasi NIK {orig_nik} -> Target NIK: {target_nik}, Nama: {target_nama}, KK: {target_kk}",
+                db_conn=conn
             )
 
         conn.commit()

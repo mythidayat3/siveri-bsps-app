@@ -981,7 +981,7 @@ function App() {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      const stageObj = stages.find(s => s.id.toString() === selectedStageId.toString());
+      const stageObj = stages.find(s => s && s.id != null && String(s.id) === String(selectedStageId));
       const stageName = (stageObj?.name || 'Tahap').replace(/\s+/g, '_');
       a.download = `VERFAL_GABUNGAN_${stageName}.xlsx`;
       document.body.appendChild(a);
@@ -1084,11 +1084,11 @@ function App() {
       const res = await fetch(`${BACKEND_URL}/api/stages?province_id=${pid}`);
       if (!res.ok) throw new Error("Gagal mengambil data tahap");
       const data = await res.json();
-      setStages(data);
-      if (data.length > 0) {
+      setStages(Array.isArray(data) ? data : []);
+      if (Array.isArray(data) && data.length > 0) {
         setSelectedStageId(prev => {
-          if (prev && data.some(s => s.id.toString() === prev)) return prev;
-          return data[0].id.toString();
+          if (prev && data.some(s => s && s.id != null && String(s.id) === String(prev))) return prev;
+          return data[0]?.id != null ? String(data[0].id) : '';
         });
       } else {
         setSelectedStageId('');
@@ -1772,8 +1772,9 @@ function App() {
           body: formData
         });
         if (!res.ok) {
-          const errData = await res.json();
-          throw new Error(errData.detail || "Gagal mengunggah file Kode Desa");
+          let msg = "Gagal mengunggah file Kode Desa";
+          try { const d = await res.json(); msg = d.detail || msg; } catch { msg = (await res.text()) || msg; }
+          throw new Error(msg);
         }
         const data = await res.json();
         showToast(data.message || "Berhasil mengunggah database Kode Desa/Kelurahan!");
@@ -1791,16 +1792,20 @@ function App() {
           body: formData
         });
         if (!res.ok) {
-          const errData = await res.json();
-          throw new Error(errData.detail || "Gagal mengunggah file");
+          let msg = "Gagal mengunggah file INVERS";
+          try { const d = await res.json(); msg = d.detail || msg; } catch { msg = (await res.text()) || msg; }
+          throw new Error(msg);
         }
         const data = await res.json();
         showToast(`Berhasil mengunggah INVERS Tahap: ${stageNameInput}. Ditambahkan ${data.inserted_records} data.`);
         setStageNameInput('');
         setSelectedFile(null);
         setUploadType('');
-        await fetchStages();
-        setSelectedStageId(data.stage_id.toString());
+        await fetchStages(selectedProvinceId);
+        if (data.stage_id) {
+          setSelectedStageId(data.stage_id.toString());
+          fetchStageData(data.stage_id.toString());
+        }
       } else {
         if (!selectedStageId) {
           showToast("Silakan pilih target Tahap INVERS terlebih dahulu", "error");
@@ -1818,8 +1823,9 @@ function App() {
           body: formData
         });
         if (!res.ok) {
-          const errData = await res.json();
-          throw new Error(errData.detail || "Gagal mengunggah file");
+          let msg = "Gagal mengunggah file Berita Acara";
+          try { const d = await res.json(); msg = d.detail || msg; } catch { msg = (await res.text()) || msg; }
+          throw new Error(msg);
         }
         const data = await res.json();
         const stats = data.stats;
@@ -1833,7 +1839,7 @@ function App() {
         fetchStageData(selectedStageId);
       }
     } catch (err) {
-      showToast(err.message, 'error');
+      showToast(err.message || "Failed to fetch", 'error');
     }
   };
 
@@ -2653,7 +2659,7 @@ function App() {
       showToast(`Tahap "${stageName}" berhasil dihapus beserta semua data terkait`);
       
       // Reset selection jika tahap yang dihapus adalah yang sedang aktif
-      if (selectedStageId === stageId.toString()) {
+      if (String(selectedStageId) === String(stageId)) {
         setSelectedStageId('');
         setStageSummary(null);
         setRecordsData(null);
@@ -2758,7 +2764,7 @@ function App() {
     }
   };
 
-  const selectedStageName = stages.find(s => s.id.toString() === selectedStageId)?.name || 'Tidak ada';
+  const selectedStageName = stages.find(s => s && s.id != null && String(s.id) === String(selectedStageId))?.name || 'Tidak ada';
 
   // Filter pencarian data
   const getFilteredInvers = () => {
@@ -4547,7 +4553,7 @@ function App() {
                     Dasbor Verifikasi Faktual (Verfal) per Kabupaten
                   </h2>
                   <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
-                    Daftar Berita Acara Verifikasi Faktual yang dikelompokkan berdasarkan Kabupaten/Kota di {stages.find(s => s.id.toString() === selectedStageId)?.name || 'Tahap Aktif'}.
+                    Daftar Berita Acara Verifikasi Faktual yang dikelompokkan berdasarkan Kabupaten/Kota di {stages.find(s => s && s.id != null && String(s.id) === String(selectedStageId))?.name || 'Tahap Aktif'}.
                   </p>
                 </div>
                 <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>

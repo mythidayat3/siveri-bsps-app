@@ -395,10 +395,14 @@ def init_db():
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS invers_stages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT UNIQUE,
+        name TEXT,
         province_id INTEGER DEFAULT 1,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY(province_id) REFERENCES provinces(id)
+        surat_filename TEXT,
+        surat_data TEXT,
+        surat_uploaded_at TIMESTAMP,
+        FOREIGN KEY(province_id) REFERENCES provinces(id),
+        UNIQUE(name, province_id)
     )
     """)
 
@@ -409,6 +413,16 @@ def init_db():
         pass
     try:
         cursor.execute("UPDATE invers_stages SET province_id = 1 WHERE province_id IS NULL OR province_id = 0")
+    except Exception:
+        pass
+
+    # Migration: drop legacy global name unique constraint if present on Postgres and add compound unique
+    try:
+        cursor.execute("ALTER TABLE invers_stages DROP CONSTRAINT IF EXISTS invers_stages_name_key")
+    except Exception:
+        pass
+    try:
+        cursor.execute("ALTER TABLE invers_stages ADD CONSTRAINT invers_stages_name_province_unique UNIQUE (name, province_id)")
     except Exception:
         pass
 

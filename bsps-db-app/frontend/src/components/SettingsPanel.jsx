@@ -156,7 +156,7 @@ export default function SettingsPanel({ stages, selectedStageId, onDeleteStage, 
               {getSortedStages().map(stage => (
                 <div 
                   key={stage.id} 
-                  className={`stage-delete-item ${selectedStageId === stage.id.toString() ? 'active' : ''}`}
+                  className={`stage-delete-item ${String(selectedStageId) === String(stage?.id) ? 'active' : ''}`}
                 >
                   <div className="stage-delete-info">
                     <span className="stage-delete-name">{stage.name}</span>
