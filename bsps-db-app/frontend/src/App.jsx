@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import * as XLSX from 'xlsx';
 import logopkp from './assets/LOGOPKP.svg';
 import SettingsPanel from './components/SettingsPanel';
+import PdfViewerModal from './components/PdfViewerModal';
+import UploadSuratModal from './components/UploadSuratModal';
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || (typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.hostname}:8000` : 'http://127.0.0.1:8000');
 
@@ -864,6 +866,7 @@ function App() {
   // State SK Dirjen
   const [skDirjenActiveSubTab, setSkDirjenActiveSubTab] = useState('daftar-pb');
   const [skDirjenSubmenuOpen, setSkDirjenSubmenuOpen] = useState(false);
+  const [rekapSubmenuOpen, setRekapSubmenuOpen] = useState(false);
   const [skDirjenBatches, setSkDirjenBatches] = useState([]);
   const [skDirjenSelectedBatch, setSkDirjenSelectedBatch] = useState('all');
   const [skDirjenRecords, setSkDirjenRecords] = useState([]);
@@ -939,8 +942,27 @@ function App() {
   });
   const [showAddProvinceModal, setShowAddProvinceModal] = useState(false);
   const [newProvinceNameInput, setNewProvinceNameInput] = useState('');
-  const [addProvinceLoading, setAddProvinceLoading] = useState(false);
   const [isExportingStageVerfal, setIsExportingStageVerfal] = useState(false);
+
+  // State Surat INVERS (Dokumen Dasar PDF)
+  const [isPdfViewerOpen, setIsPdfViewerOpen] = useState(false);
+  const [isUploadSuratOpen, setIsUploadSuratOpen] = useState(false);
+
+  const handleDeleteSuratInvers = async (stageId, stageName) => {
+    if (!window.confirm(`Apakah Anda yakin ingin menghapus dokumen Surat INVERS untuk "${stageName || 'Tahap ini'}"?`)) return;
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/stage/${stageId}/surat-invers`, {
+        method: 'DELETE'
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Gagal menghapus dokumen surat');
+      showToast(data.message || 'Dokumen Surat INVERS berhasil dihapus', 'success');
+      setIsPdfViewerOpen(false);
+      fetchStages(selectedProvinceId);
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  };
 
   const handleExportStageVerfalExcel = async () => {
     if (!selectedStageId) {
@@ -3415,18 +3437,23 @@ function App() {
             <li 
               className={`menu-item has-submenu ${activeTab === 'sk-dirjen' ? 'active' : ''}`}
             >
-              <div style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
-                <div onClick={() => {
-                  setActiveTab('sk-dirjen');
-                  if (!skDirjenActiveSubTab) setSkDirjenActiveSubTab('daftar-pb');
-                  setMobileMenuOpen(false);
-                }} style={{ flex: 1, display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+              <div 
+                onClick={() => {
+                  setSkDirjenSubmenuOpen(!skDirjenSubmenuOpen);
+                  if (activeTab !== 'sk-dirjen') {
+                    setActiveTab('sk-dirjen');
+                    if (!skDirjenActiveSubTab) setSkDirjenActiveSubTab('daftar-pb');
+                    fetchSkDirjenBatches();
+                  }
+                }}
+                style={{ display: 'flex', alignItems: 'center', width: '100%', cursor: 'pointer' }}
+              >
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center' }}>
                   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "8px", verticalAlign: "middle" }}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
                   SK Dirjen
                 </div>
                 <span 
-                  onClick={(e) => { e.stopPropagation(); setSkDirjenSubmenuOpen(!skDirjenSubmenuOpen); }}
-                  style={{ cursor: 'pointer', padding: '4px', transition: 'transform 0.2s', transform: skDirjenSubmenuOpen ? 'rotate(90deg)' : 'rotate(0deg)', display: 'flex', alignItems: 'center' }}
+                  style={{ padding: '4px', transition: 'transform 0.2s', transform: skDirjenSubmenuOpen ? 'rotate(90deg)' : 'rotate(0deg)', display: 'flex', alignItems: 'center' }}
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
                 </span>
@@ -3457,40 +3484,71 @@ function App() {
                 <span className="menu-badge">{getActiveMismatchCount()}</span>
               )}
             </li>
+
+            {/* Dropdown Rekapitulasi (Penyatuan 4 Halaman Rekap) */}
             <li 
-              className={`menu-item ${activeTab === 'rekap' ? 'active' : ''}`}
-              onClick={() => { setActiveTab('rekap'); fetchRekapKeseluruhan(); setMobileMenuOpen(false); }}
+              className={`menu-item has-submenu ${['rekap', 'rekap-batch-ba', 'rekap-batch-verfal', 'rekap-unggahan'].includes(activeTab) ? 'active' : ''}`}
             >
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M16 6l2.29 2.29-4.88 4.88-4-4L2 16.59 3.41 18l6-6 4 4 6.3-6.29L22 12V6h-6z"/></svg>
-              Rekap Keseluruhan
+              <div 
+                onClick={() => {
+                  setRekapSubmenuOpen(!rekapSubmenuOpen);
+                  if (!['rekap', 'rekap-batch-ba', 'rekap-batch-verfal', 'rekap-unggahan'].includes(activeTab)) {
+                    setActiveTab('rekap');
+                    fetchRekapKeseluruhan();
+                  }
+                }}
+                style={{ display: 'flex', alignItems: 'center', width: '100%', cursor: 'pointer' }}
+              >
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center' }}>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "8px", verticalAlign: "middle" }}>
+                    <line x1="18" y1="20" x2="18" y2="10"></line>
+                    <line x1="12" y1="20" x2="12" y2="4"></line>
+                    <line x1="6" y1="20" x2="6" y2="14"></line>
+                  </svg>
+                  Rekapitulasi
+                </div>
+                <span 
+                  style={{ padding: '4px', transition: 'transform 0.2s', transform: rekapSubmenuOpen ? 'rotate(90deg)' : 'rotate(0deg)', display: 'flex', alignItems: 'center' }}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                </span>
+              </div>
+              {rekapSubmenuOpen && (
+                <ul className="submenu">
+                  <li 
+                    className={`submenu-item ${activeTab === 'rekap' ? 'active' : ''}`}
+                    onClick={() => { setActiveTab('rekap'); fetchRekapKeseluruhan(); setMobileMenuOpen(false); }}
+                  >
+                    Rekap Keseluruhan
+                  </li>
+                  <li 
+                    className={`submenu-item ${activeTab === 'rekap-batch-ba' ? 'active' : ''}`}
+                    onClick={() => { setActiveTab('rekap-batch-ba'); fetchRekapBatchBA(); setMobileMenuOpen(false); }}
+                  >
+                    Rekap Batch BA
+                  </li>
+                  <li 
+                    className={`submenu-item ${activeTab === 'rekap-batch-verfal' ? 'active' : ''}`}
+                    onClick={() => { setActiveTab('rekap-batch-verfal'); fetchRekapBatchVerfal(); setMobileMenuOpen(false); }}
+                  >
+                    Rekap BA Verfal
+                  </li>
+                  <li 
+                    className={`submenu-item ${activeTab === 'rekap-unggahan' ? 'active' : ''}`}
+                    onClick={() => { setActiveTab('rekap-unggahan'); fetchRekapUnggahan(); setMobileMenuOpen(false); }}
+                  >
+                    Rekap Unggahan
+                  </li>
+                </ul>
+              )}
             </li>
-            <li 
-              className={`menu-item ${activeTab === 'rekap-batch-ba' ? 'active' : ''}`}
-              onClick={() => { setActiveTab('rekap-batch-ba'); fetchRekapBatchBA(); setMobileMenuOpen(false); }}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
-              Rekap Batch BA
-            </li>
-            <li 
-              className={`menu-item ${activeTab === 'rekap-batch-verfal' ? 'active' : ''}`}
-              onClick={() => { setActiveTab('rekap-batch-verfal'); fetchRekapBatchVerfal(); setMobileMenuOpen(false); }}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "8px", verticalAlign: "middle" }}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><polyline points="9 15 12 12 15 15"></polyline></svg>
-              Rekap BA Verfal
-            </li>
+
             <li 
               className={`menu-item ${activeTab === 'global-search' ? 'active' : ''}`}
               onClick={() => { setActiveTab('global-search'); fetchGlobalSearch(); setMobileMenuOpen(false); }}
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
               Pencarian Global
-            </li>
-            <li 
-              className={`menu-item ${activeTab === 'rekap-unggahan' ? 'active' : ''}`}
-              onClick={() => { setActiveTab('rekap-unggahan'); fetchRekapUnggahan(); setMobileMenuOpen(false); }}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
-              Rekap Unggahan
             </li>
             {isAdmin && (
               <li 
@@ -3587,21 +3645,85 @@ function App() {
         {/* Header Bar */}
         <header className="header-bar">
           <div className="header-title">
-            <h1 style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              {selectedStageName}
-              {selectedStageId && isAdmin && (
-                <button
-                  className="btn btn-secondary btn-sm"
-                  style={{ padding: '2px 8px', fontSize: '0.72rem', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px', verticalAlign: 'middle' }}
-                  onClick={() => openRenameStageModal(selectedStageId, selectedStageName)}
-                  title="Ubah Nama Tahap INVERS"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
-                  Ubah Nama Tahap
-                </button>
+            <div className="stage-header-title-row">
+              <h1 className="stage-title-text">{selectedStageName}</h1>
+
+              {/* Stage Actions */}
+              {selectedStageId && (
+                <div className="stage-actions-group">
+                  {isAdmin && (
+                    <button
+                      className="btn btn-secondary btn-stage-rename"
+                      onClick={() => openRenameStageModal(selectedStageId, selectedStageName)}
+                      title="Ubah Nama Tahap INVERS"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+                      Ubah Nama Tahap
+                    </button>
+                  )}
+
+                  {/* Tombol Dokumen Surat INVERS (PDF) */}
+                  {(() => {
+                    const currentStageObj = stages.find(s => s.id === Number(selectedStageId) || s.id === selectedStageId);
+                    const hasSurat = Boolean(currentStageObj?.has_surat || currentStageObj?.surat_filename);
+
+                    if (hasSurat) {
+                      return (
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                          <button
+                            className="btn btn-surat-invers"
+                            onClick={() => setIsPdfViewerOpen(true)}
+                            title={`Lihat Dokumen Surat INVERS: ${currentStageObj.surat_filename || 'Surat'}`}
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                              <polyline points="14 2 14 8 20 8"></polyline>
+                              <line x1="16" y1="13" x2="8" y2="13"></line>
+                              <line x1="16" y1="17" x2="8" y2="17"></line>
+                              <polyline points="10 9 9 9 8 9"></polyline>
+                            </svg>
+                            Lihat Surat INVERS
+                          </button>
+
+                          {isAdmin && (
+                            <button
+                              className="btn btn-secondary btn-surat-change"
+                              onClick={() => setIsUploadSuratOpen(true)}
+                              title="Ganti Dokumen Surat INVERS"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+                              </svg>
+                              Ganti
+                            </button>
+                          )}
+                        </div>
+                      );
+                    }
+
+                    if (isAdmin) {
+                      return (
+                        <button
+                          className="btn btn-secondary btn-surat-upload-dashed"
+                          onClick={() => setIsUploadSuratOpen(true)}
+                          title="Upload Dokumen Surat Instruksi/Dasar INVERS (PDF)"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                            <polyline points="17 8 12 3 7 8"></polyline>
+                            <line x1="12" y1="3" x2="12" y2="15"></line>
+                          </svg>
+                          Upload Surat INVERS
+                        </button>
+                      );
+                    }
+
+                    return null;
+                  })()}
+                </div>
               )}
-            </h1>
-            <p>Sistem Database Verifikasi Perumahan Swadaya</p>
+            </div>
+            <p style={{ marginTop: '4px', fontSize: '0.84rem', color: 'var(--text-muted)' }}>Sistem Database Verifikasi Perumahan Swadaya</p>
           </div>
 
           <div className="search-wrapper">
@@ -7238,25 +7360,25 @@ function App() {
 
         {/* Rekap Batch Berita Acara View */}
         {activeTab === 'rekap-batch-ba' && (
-          <div className="rekap-keseluruhan-page">
-            <div className="section-header" style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div className="rekap-batch-container">
+            <div className="rekap-batch-header-bar">
               <div>
-                <h2 style={{ fontSize: '1.3rem', fontWeight: '700', color: 'var(--text-primary)' }}>
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "6px", verticalAlign: "middle" }}><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>Rekap Batch Berita Acara
+                <h2 className="rekap-batch-title">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "8px", verticalAlign: "middle" }}><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+                  Rekapitulasi Batch Berita Acara
                 </h2>
-                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                <p className="rekap-batch-subtitle">
                   Rekapitulasi verifikasi per Batch Berita Acara di masing-masing Tahap INVERS. Hanya menampilkan batch Berita Acara yang sudah ditandai "Sudah Terbit".
                 </p>
               </div>
               {!rekapBatchLoading && rekapBatchData && rekapBatchData.stages.length > 0 && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div className="rekap-batch-actions">
                   <button 
-                    className="btn btn-secondary btn-sm"
+                    className="btn btn-primary btn-sm rekap-batch-btn-export"
                     onClick={handleExportRekapBatchBA}
-                    style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: '600' }}
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-                    Ekspor Rekap Excel
+                    Ekspor Rekap BA Excel
                   </button>
                 </div>
               )}
@@ -7325,12 +7447,20 @@ function App() {
                                     className={`rekap-batch-th-level2 ${borderClass}`}
                                   >
                                     <div style={{ fontWeight: 700, fontSize: '0.8rem' }}>{batch.batch_name.toUpperCase()}</div>
-                                    <div style={{ fontWeight: 500, fontSize: '0.66rem', marginTop: '2px', opacity: 0.85 }}>
-                                      No: {batch.nomor_ba || '—'}
-                                    </div>
-                                    <div style={{ fontWeight: 500, fontSize: '0.66rem', opacity: 0.85 }}>
-                                      Tgl: {batch.tanggal_ba || '—'}
-                                    </div>
+                                    {batch.batch_name === 'VERFAL' ? (
+                                      <div style={{ fontWeight: 500, fontSize: '0.66rem', marginTop: '2px', opacity: 0.85 }}>
+                                        (Verifikasi Faktual)
+                                      </div>
+                                    ) : (
+                                      <>
+                                        <div style={{ fontWeight: 500, fontSize: '0.66rem', marginTop: '2px', opacity: 0.85 }}>
+                                          No: {batch.nomor_ba || '—'}
+                                        </div>
+                                        <div style={{ fontWeight: 500, fontSize: '0.66rem', opacity: 0.85 }}>
+                                          Tgl: {batch.tanggal_ba || '—'}
+                                        </div>
+                                      </>
+                                    )}
                                   </th>
                                 );
                               })
@@ -7524,76 +7654,34 @@ function App() {
               </div>
             ) : (() => {
               const allStages = rekapBatchVerfalData.stages;
-              const hasBatches = allStages.some(s => s.batches && s.batches.length > 0);
-              if (!hasBatches) {
-                return (
-                  <div className="empty-state">
-                    <p style={{ fontWeight: 600, color: 'var(--text-main)' }}>Belum ada Berita Acara Verfal pada tahap yang dipilih</p>
-                  </div>
-                );
-              }
               return (
                 <div className="rekap-scroll-container" style={{ border: '1px solid var(--border)', borderRadius: '8px', overflow: 'auto' }}>
                   <table className="rekap-table-unified">
                     <thead>
                       <tr>
-                        <th className="rekap-batch-corner" rowSpan="3" style={{ left: 0, width: '45px', minWidth: '45px', maxWidth: '45px' }}>No</th>
-                        <th className="rekap-batch-corner rekap-batch-border-stage" rowSpan="3" style={{ left: '45px', width: '220px', minWidth: '220px', maxWidth: '220px', textAlign: 'left' }}>Kabupaten / Kota</th>
-                        {allStages.map(stage => {
-                          const batchCount = stage.batches.length;
-                          if (batchCount === 0) return null;
-                          return (
-                            <th 
-                              key={stage.stage_id} 
-                              colSpan={batchCount * 5} 
-                              className="rekap-batch-th-level1 rekap-batch-border-stage"
-                            >
-                              {stage.stage_name.toUpperCase()}
-                            </th>
-                          );
-                        })}
+                        <th className="rekap-verfal-corner" rowSpan="2" style={{ left: 0, width: '45px', minWidth: '45px', maxWidth: '45px' }}>No</th>
+                        <th className="rekap-verfal-corner rekap-batch-border-stage" rowSpan="2" style={{ left: '45px', width: '220px', minWidth: '220px', maxWidth: '220px', textAlign: 'left' }}>Kabupaten / Kota</th>
+                        {allStages.map(stage => (
+                          <th 
+                            key={stage.stage_id} 
+                            colSpan="6" 
+                            className="rekap-verfal-th-level1 rekap-batch-border-stage"
+                          >
+                            {stage.stage_name.toUpperCase()}
+                          </th>
+                        ))}
                       </tr>
                       <tr>
-                        {allStages.map(stage => 
-                          stage.batches.map((batch, bIdx) => {
-                            const isLastBatchInStage = bIdx === stage.batches.length - 1;
-                            const borderClass = isLastBatchInStage ? 'rekap-batch-border-stage' : 'rekap-batch-border-ba';
-                            return (
-                              <th 
-                                key={batch.batch_id} 
-                                colSpan="5" 
-                                className={`rekap-batch-th-level2 ${borderClass}`}
-                              >
-                                <div style={{ fontWeight: 700, fontSize: '0.8rem' }}>
-                                  {batch.batch_name.toUpperCase()} {batch.kabupaten ? `(${batch.kabupaten})` : ''}
-                                </div>
-                                <div style={{ fontWeight: 500, fontSize: '0.66rem', marginTop: '2px', opacity: 0.85 }}>
-                                  No: {batch.nomor_ba || '—'}
-                                </div>
-                                <div style={{ fontWeight: 500, fontSize: '0.66rem', opacity: 0.85 }}>
-                                  Tgl: {batch.tanggal_ba || '—'}
-                                </div>
-                              </th>
-                            );
-                          })
-                        )}
-                      </tr>
-                      <tr>
-                        {allStages.map(stage => 
-                          stage.batches.map((batch, bIdx) => {
-                            const isLastBatchInStage = bIdx === stage.batches.length - 1;
-                            const borderClass = isLastBatchInStage ? 'rekap-batch-border-stage' : 'rekap-batch-border-ba';
-                            return (
-                              <React.Fragment key={batch.batch_id}>
-                                <th className="rekap-batch-th-level3 rekap-batch-sub-verif">VERIFIKASI</th>
-                                <th className="rekap-batch-th-level3 rekap-batch-sub-lolos">LOLOS</th>
-                                <th className="rekap-batch-th-level3 rekap-batch-sub-tidak">TIDAK LOLOS</th>
-                                <th className="rekap-batch-th-level3 rekap-batch-sub-sk-sudah">SUDAH SK</th>
-                                <th className={`rekap-batch-th-level3 rekap-batch-sub-sk-belum ${borderClass}`}>BELUM SK</th>
-                              </React.Fragment>
-                            );
-                          })
-                        )}
+                        {allStages.map(stage => (
+                          <React.Fragment key={stage.stage_id}>
+                            <th className="rekap-verfal-th-level2" style={{ backgroundColor: '#e2e8f0', color: '#1e293b', fontWeight: 700 }}>ALOKASI</th>
+                            <th className="rekap-verfal-th-level2 rekap-batch-sub-verif">VERIFIKASI</th>
+                            <th className="rekap-verfal-th-level2 rekap-batch-sub-lolos">LOLOS</th>
+                            <th className="rekap-verfal-th-level2 rekap-batch-sub-tidak">TIDAK LOLOS</th>
+                            <th className="rekap-verfal-th-level2 rekap-batch-sub-sk-sudah">SUDAH SK</th>
+                            <th className="rekap-verfal-th-level2 rekap-batch-sub-sk-belum rekap-batch-border-stage">BELUM SK</th>
+                          </React.Fragment>
+                        ))}
                       </tr>
                     </thead>
                     <tbody>
@@ -7602,27 +7690,25 @@ function App() {
                           <tr key={kabIdx}>
                             <td className="rekap-frozen-no" style={{ width: '45px', minWidth: '45px', maxWidth: '45px', left: 0 }}>{kabIdx + 1}</td>
                             <td className="rekap-frozen-kab rekap-batch-border-stage" style={{ width: '220px', minWidth: '220px', maxWidth: '220px', left: '45px' }}>{kab}</td>
-                            {allStages.map(stage => 
-                              stage.batches.map((batch, bIdx) => {
-                                const isLastBatchInStage = bIdx === stage.batches.length - 1;
-                                const borderClass = isLastBatchInStage ? 'rekap-batch-border-stage' : 'rekap-batch-border-ba';
-                                const kd = batch.kabupaten_data[kabIdx];
-                                const v = kd?.verifikasi || 0;
-                                const l = kd?.lolos || 0;
-                                const tl = kd?.tidak_lolos || 0;
-                                const sks = kd?.sk_sudah || 0;
-                                const skb = kd?.sk_belum || 0;
-                                return (
-                                  <React.Fragment key={batch.batch_id}>
-                                    <td className="rekap-cell rekap-batch-cell-verif">{v > 0 ? v : '-'}</td>
-                                    <td className="rekap-cell rekap-batch-cell-lolos">{l > 0 ? l : '-'}</td>
-                                    <td className="rekap-cell rekap-batch-cell-tidak">{tl > 0 ? tl : '-'}</td>
-                                    <td className="rekap-cell rekap-batch-cell-sk-sudah">{sks > 0 ? sks : '-'}</td>
-                                    <td className={`rekap-cell rekap-batch-cell-sk-belum ${borderClass}`}>{skb > 0 ? skb : '-'}</td>
-                                  </React.Fragment>
-                                );
-                              })
-                            )}
+                            {allStages.map(stage => {
+                              const kd = stage.kabupaten_data[kabIdx];
+                              const a = kd?.alokasi || 0;
+                              const v = kd?.verifikasi || 0;
+                              const l = kd?.lolos || 0;
+                              const tl = kd?.tidak_lolos || 0;
+                              const sks = kd?.sk_sudah || 0;
+                              const skb = kd?.sk_belum || 0;
+                              return (
+                                <React.Fragment key={stage.stage_id}>
+                                  <td className="rekap-cell" style={{ fontWeight: 600, color: 'var(--text-main)', backgroundColor: '#f8fafc' }}>{a > 0 ? a : '-'}</td>
+                                  <td className="rekap-cell rekap-batch-cell-verif">{v > 0 ? v : '-'}</td>
+                                  <td className="rekap-cell rekap-batch-cell-lolos">{l > 0 ? l : '-'}</td>
+                                  <td className="rekap-cell rekap-batch-cell-tidak">{tl > 0 ? tl : '-'}</td>
+                                  <td className="rekap-cell rekap-batch-cell-sk-sudah">{sks > 0 ? sks : '-'}</td>
+                                  <td className="rekap-cell rekap-batch-cell-sk-belum rekap-batch-border-stage">{skb > 0 ? skb : '-'}</td>
+                                </React.Fragment>
+                              );
+                            })}
                           </tr>
                         );
                       })}
@@ -7631,22 +7717,19 @@ function App() {
                       <tr className="rekap-footer-row">
                         <td className="rekap-footer-frozen" style={{ left: 0, width: '45px', minWidth: '45px', maxWidth: '45px' }}></td>
                         <td className="rekap-footer-frozen rekap-batch-border-stage" style={{ left: '45px', width: '220px', minWidth: '220px', maxWidth: '220px', fontWeight: 700, textAlign: 'left' }}>TOTAL</td>
-                        {allStages.map(stage => 
-                          stage.batches.map((batch, bIdx) => {
-                            const isLastBatchInStage = bIdx === stage.batches.length - 1;
-                            const borderClass = isLastBatchInStage ? 'rekap-batch-border-stage' : 'rekap-batch-border-ba';
-                            const t = batch.totals;
-                            return (
-                              <React.Fragment key={batch.batch_id}>
-                                <td className="rekap-footer-cell rekap-batch-cell-verif">{t.verifikasi || 0}</td>
-                                <td className="rekap-footer-cell rekap-batch-cell-lolos">{t.lolos || 0}</td>
-                                <td className="rekap-footer-cell rekap-batch-cell-tidak">{t.tidak_lolos || 0}</td>
-                                <td className="rekap-footer-cell rekap-batch-cell-sk-sudah">{t.sk_sudah || 0}</td>
-                                <td className={`rekap-footer-cell rekap-batch-cell-sk-belum ${borderClass}`}>{t.sk_belum || 0}</td>
-                              </React.Fragment>
-                            );
-                          })
-                        )}
+                        {allStages.map(stage => {
+                          const t = stage.totals;
+                          return (
+                            <React.Fragment key={stage.stage_id}>
+                              <td className="rekap-footer-cell" style={{ fontWeight: 700, color: 'var(--text-main)' }}>{t.alokasi || 0}</td>
+                              <td className="rekap-footer-cell rekap-batch-cell-verif">{t.verifikasi || 0}</td>
+                              <td className="rekap-footer-cell rekap-batch-cell-lolos">{t.lolos || 0}</td>
+                              <td className="rekap-footer-cell rekap-batch-cell-tidak">{t.tidak_lolos || 0}</td>
+                              <td className="rekap-footer-cell rekap-batch-cell-sk-sudah">{t.sk_sudah || 0}</td>
+                              <td className="rekap-footer-cell rekap-batch-cell-sk-belum rekap-batch-border-stage">{t.sk_belum || 0}</td>
+                            </React.Fragment>
+                          );
+                        })}
                       </tr>
                     </tfoot>
                   </table>
@@ -8534,6 +8617,42 @@ function App() {
             </div>
           </form>
         </div>
+      )}
+
+      {/* Modal Pratinjau Dokumen Surat INVERS (PDF) */}
+      {isPdfViewerOpen && selectedStageId && (() => {
+        const currentStageObj = stages.find(s => s.id === Number(selectedStageId) || s.id === selectedStageId);
+        return (
+          <PdfViewerModal
+            isOpen={isPdfViewerOpen}
+            onClose={() => setIsPdfViewerOpen(false)}
+            pdfUrl={`${BACKEND_URL}/api/stage/${selectedStageId}/surat-invers`}
+            filename={currentStageObj?.surat_filename}
+            stageName={selectedStageName}
+            uploadedAt={currentStageObj?.surat_uploaded_at}
+            isAdmin={isAdmin}
+            onReplace={() => {
+              setIsPdfViewerOpen(false);
+              setIsUploadSuratOpen(true);
+            }}
+            onDelete={() => handleDeleteSuratInvers(selectedStageId, selectedStageName)}
+          />
+        );
+      })()}
+
+      {/* Modal Upload Dokumen Surat INVERS */}
+      {isUploadSuratOpen && selectedStageId && (
+        <UploadSuratModal
+          isOpen={isUploadSuratOpen}
+          onClose={() => setIsUploadSuratOpen(false)}
+          stageId={selectedStageId}
+          stageName={selectedStageName}
+          BACKEND_URL={BACKEND_URL}
+          showToast={showToast}
+          onUploaded={() => {
+            fetchStages(selectedProvinceId);
+          }}
+        />
       )}
 
       </main>

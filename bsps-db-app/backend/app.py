@@ -6,6 +6,8 @@ import sqlite3
 import openpyxl
 import docx
 import zipfile
+import base64
+import urllib.parse
 from collections import Counter
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import cm, mm
@@ -377,15 +379,23 @@ def get_stages(province_id: int = Query(None)):
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    if not province_id or province_id == 1:
+    # Parse province_id cleanly
+    try:
+        p_id = int(province_id) if (province_id is not None and isinstance(province_id, (int, str)) and str(province_id).isdigit()) else None
+    except Exception:
+        p_id = None
+
+    if not p_id or p_id == 1:
         filter_sql = "WHERE (s.province_id = 1 OR s.province_id IS NULL OR s.province_id = 0)"
         params = ()
     else:
         filter_sql = "WHERE s.province_id = ?"
-        params = (province_id,)
+        params = (p_id,)
         
     cursor.execute(f"""
         SELECT s.id, s.name, s.province_id, s.created_at, 
+               s.surat_filename, s.surat_uploaded_at,
+               (CASE WHEN s.surat_filename IS NOT NULL AND s.surat_filename != '' THEN 1 ELSE 0 END) as has_surat,
                (SELECT COUNT(*) FROM invers_records ir 
                 JOIN invers_revisions irv ON ir.revision_id = irv.id 
                 WHERE irv.stage_id = s.id AND irv.is_active = 1) as record_count,
@@ -2315,6 +2325,108 @@ def rename_stage(stage_id: int, body: dict = Body(...)):
         raise HTTPException(status_code=500, detail=f"Gagal mengubah nama tahap: {str(e)}")
     conn.close()
     return {"stage_id": stage_id, "name": new_name, "message": "Nama Tahap INVERS berhasil diperbarui"}
+
+# --- SURAT INVERS / DOKUMEN DASAR VERIFIKASI (PDF) ---
+
+@app.post("/api/stage/{stage_id}/surat-invers/upload")
+async def upload_surat_invers(stage_id: int, file: UploadFile = File(...)):
+    """Upload dokumen surat instruksi/dasar INVERS (PDF) per tahap."""
+    if not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Hanya file dokumen PDF (.pdf) yang diperbolehkan")
+    
+    file_bytes = await file.read()
+    if len(file_bytes) == 0:
+        raise HTTPException(status_code=400, detail="File PDF kosong")
+    if len(file_bytes) > 25 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Ukuran file PDF maksimal 25 MB")
+        
+    base64_data = base64.b64encode(file_bytes).decode('utf-8')
+    filename = os.path.basename(file.filename)
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT name FROM invers_stages WHERE id = ?", (stage_id,))
+        stage_row = cursor.fetchone()
+        if not stage_row:
+            raise HTTPException(status_code=404, detail="Tahap tidak ditemukan")
+            
+        cursor.execute("""
+            UPDATE invers_stages
+            SET surat_filename = ?,
+                surat_data = ?,
+                surat_uploaded_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (filename, base64_data, stage_id))
+        conn.commit()
+        
+        log_activity(
+            username="Admin",
+            action="UPLOAD_SURAT_INVERS",
+            entity_type="STAGE",
+            entity_name=stage_row['name'] if stage_row else str(stage_id),
+            details=f"Mengunggah dokumen surat INVERS: {filename} ({round(len(file_bytes)/1024, 1)} KB)"
+        )
+    finally:
+        conn.close()
+        
+    return {"message": "Dokumen Surat INVERS berhasil diunggah", "filename": filename}
+
+@app.get("/api/stage/{stage_id}/surat-invers")
+def get_surat_invers(stage_id: int, download: int = 0):
+    """Ambil atau tampilkan dokumen surat instruksi/dasar INVERS dalam bentuk PDF streaming."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT name, surat_filename, surat_data FROM invers_stages WHERE id = ?", (stage_id,))
+        row = cursor.fetchone()
+        if not row or not row['surat_data']:
+            raise HTTPException(status_code=404, detail="Dokumen Surat INVERS belum diunggah untuk tahap ini")
+            
+        pdf_bytes = base64.b64decode(row['surat_data'])
+        filename = row['surat_filename'] or f"Surat_INVERS_{row['name']}.pdf"
+        
+        disposition_type = "attachment" if download else "inline"
+        encoded_filename = urllib.parse.quote(filename)
+        
+        headers = {
+            "Content-Disposition": f"{disposition_type}; filename*=UTF-8''{encoded_filename}",
+            "Content-Type": "application/pdf"
+        }
+        return StreamingResponse(io.BytesIO(pdf_bytes), media_type="application/pdf", headers=headers)
+    finally:
+        conn.close()
+
+@app.delete("/api/stage/{stage_id}/surat-invers")
+def delete_surat_invers(stage_id: int):
+    """Hapus dokumen surat INVERS dari tahap."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT name, surat_filename FROM invers_stages WHERE id = ?", (stage_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Tahap tidak ditemukan")
+            
+        cursor.execute("""
+            UPDATE invers_stages
+            SET surat_filename = NULL,
+                surat_data = NULL,
+                surat_uploaded_at = NULL
+            WHERE id = ?
+        """, (stage_id,))
+        conn.commit()
+        
+        log_activity(
+            username="Admin",
+            action="DELETE_SURAT_INVERS",
+            entity_type="STAGE",
+            entity_name=row['name'] if row else str(stage_id),
+            details=f"Menghapus dokumen surat INVERS ({row['surat_filename'] or 'Surat'})"
+        )
+    finally:
+        conn.close()
+    return {"message": "Dokumen Surat INVERS berhasil dihapus"}
 
 @app.post("/api/upload/village-codes")
 async def upload_village_codes(file: UploadFile = File(...)):
@@ -5603,7 +5715,7 @@ def get_rekap_batch_ba(published_only: int = 1, province_id: int = 1):
         stage_name = stage['name']
         
         cursor.execute(f"""
-            SELECT id, name, is_published, nomor_ba, tanggal_ba, sort_order 
+            SELECT id, name, is_published, nomor_ba, tanggal_ba, sort_order, batch_type 
             FROM verified_batches 
             WHERE stage_id = ? {stage_batch_filter}
             ORDER BY sort_order ASC, uploaded_at ASC, id ASC
@@ -5613,8 +5725,13 @@ def get_rekap_batch_ba(published_only: int = 1, province_id: int = 1):
         if not batches:
             continue
             
+        reg_batches = [b for b in batches if (b.get('batch_type') or '').upper() != 'VERFAL']
+        verfal_batches = [b for b in batches if (b.get('batch_type') or '').upper() == 'VERFAL']
+        
         batches_data = []
-        for batch in batches:
+        
+        # 1. Process regular batches as individual columns
+        for batch in reg_batches:
             batch_id = batch['id']
             batch_name = batch['name']
             
@@ -5638,9 +5755,9 @@ def get_rekap_batch_ba(published_only: int = 1, province_id: int = 1):
             
             stats_by_kab = {}
             for row in cursor.fetchall():
-                lolos = row['lolos']
-                tidak_lolos = row['tidak_lolos']
-                sk_sudah = row['sk_sudah']
+                lolos = row['lolos'] or 0
+                tidak_lolos = row['tidak_lolos'] or 0
+                sk_sudah = row['sk_sudah'] or 0
                 sk_belum = max(0, lolos - sk_sudah)
                 stats_by_kab[row['kab']] = {
                     "lolos": lolos,
@@ -5679,6 +5796,81 @@ def get_rekap_batch_ba(published_only: int = 1, province_id: int = 1):
                 "is_published": batch["is_published"],
                 "nomor_ba": batch.get("nomor_ba"),
                 "tanggal_ba": batch.get("tanggal_ba"),
+                "kabupaten_data": kab_data,
+                "totals": {
+                    "verifikasi": total_verifikasi,
+                    "lolos": total_lolos,
+                    "tidak_lolos": total_tidak_lolos,
+                    "sk_sudah": total_sk_sudah,
+                    "sk_belum": total_sk_belum
+                }
+            })
+
+        # 2. Consolidate all Verfal batches for this stage into 1 single column
+        if verfal_batches:
+            verfal_ids = [b['id'] for b in verfal_batches]
+            placeholders = ','.join(['?'] * len(verfal_ids))
+            cursor.execute(f"""
+                SELECT UPPER(TRIM(COALESCE(vr.kabupaten_kota, ''))) as kab,
+                       SUM(CASE WHEN vr.status = 'LOLOS' THEN 1 ELSE 0 END) as lolos,
+                       SUM(CASE WHEN vr.status = 'TIDAK LOLOS' THEN 1 ELSE 0 END) as tidak_lolos,
+                       SUM(CASE WHEN vr.status = 'LOLOS' AND sk.verified_record_id IS NOT NULL THEN 1 ELSE 0 END) as sk_sudah
+                FROM verified_records vr
+                LEFT JOIN (
+                    SELECT DISTINCT verified_record_id 
+                    FROM sk_dirjen_matches 
+                    WHERE verified_record_id IS NOT NULL
+                      AND (match_type = 'PERFECT' 
+                           OR (match_type = 'NEEDS_APPROVAL' AND override_status = 'APPROVED')
+                           OR match_type = 'MANUAL_PAIR')
+                ) sk ON sk.verified_record_id = vr.id
+                WHERE vr.batch_id IN ({placeholders}) AND TRIM(COALESCE(vr.kabupaten_kota, '')) != ''
+                GROUP BY kab
+            """, verfal_ids)
+            
+            stats_by_kab = {}
+            for row in cursor.fetchall():
+                lolos = row['lolos'] or 0
+                tidak_lolos = row['tidak_lolos'] or 0
+                sk_sudah = row['sk_sudah'] or 0
+                sk_belum = max(0, lolos - sk_sudah)
+                stats_by_kab[row['kab']] = {
+                    "lolos": lolos,
+                    "tidak_lolos": tidak_lolos,
+                    "verifikasi": lolos + tidak_lolos,
+                    "sk_sudah": sk_sudah,
+                    "sk_belum": sk_belum
+                }
+            
+            kab_data = []
+            total_verifikasi = 0
+            total_lolos = 0
+            total_tidak_lolos = 0
+            total_sk_sudah = 0
+            total_sk_belum = 0
+            
+            for kab in all_kabupaten:
+                stats = stats_by_kab.get(kab, {"lolos": 0, "tidak_lolos": 0, "verifikasi": 0, "sk_sudah": 0, "sk_belum": 0})
+                kab_data.append({
+                    "kabupaten": kab,
+                    "verifikasi": stats["verifikasi"],
+                    "lolos": stats["lolos"],
+                    "tidak_lolos": stats["tidak_lolos"],
+                    "sk_sudah": stats["sk_sudah"],
+                    "sk_belum": stats["sk_belum"]
+                })
+                total_verifikasi += stats["verifikasi"]
+                total_lolos += stats["lolos"]
+                total_tidak_lolos += stats["tidak_lolos"]
+                total_sk_sudah += stats["sk_sudah"]
+                total_sk_belum += stats["sk_belum"]
+                
+            batches_data.append({
+                "batch_id": f"verfal_{stage_id}",
+                "batch_name": "VERFAL",
+                "is_published": 1,
+                "nomor_ba": "Gabungan",
+                "tanggal_ba": "—",
                 "kabupaten_data": kab_data,
                 "totals": {
                     "verifikasi": total_verifikasi,
@@ -5743,7 +5935,7 @@ def export_rekap_batch_ba(published_only: int = 1):
         stage_name = stage['name']
         
         cursor.execute(f"""
-            SELECT id, name, nomor_ba, tanggal_ba 
+            SELECT id, name, nomor_ba, tanggal_ba, batch_type 
             FROM verified_batches 
             WHERE stage_id = ? {stage_batch_filter}
             ORDER BY sort_order ASC, uploaded_at ASC, id ASC
@@ -5753,8 +5945,11 @@ def export_rekap_batch_ba(published_only: int = 1):
         if not batches:
             continue
             
+        reg_batches = [b for b in batches if (b.get('batch_type') or '').upper() != 'VERFAL']
+        verfal_batches = [b for b in batches if (b.get('batch_type') or '').upper() == 'VERFAL']
+        
         batches_data = []
-        for batch in batches:
+        for batch in reg_batches:
             batch_id = batch['id']
             batch_name = batch['name']
             
@@ -5778,9 +5973,9 @@ def export_rekap_batch_ba(published_only: int = 1):
             
             stats_by_kab = {}
             for row in cursor.fetchall():
-                lolos = row['lolos']
-                tidak_lolos = row['tidak_lolos']
-                sk_sudah = row['sk_sudah']
+                lolos = row['lolos'] or 0
+                tidak_lolos = row['tidak_lolos'] or 0
+                sk_sudah = row['sk_sudah'] or 0
                 sk_belum = max(0, lolos - sk_sudah)
                 stats_by_kab[row['kab']] = {
                     "lolos": lolos,
@@ -5816,6 +6011,77 @@ def export_rekap_batch_ba(published_only: int = 1):
                 "batch_name": batch_name,
                 "nomor_ba": batch.get("nomor_ba"),
                 "tanggal_ba": batch.get("tanggal_ba"),
+                "data": kab_data,
+                "totals": {
+                    "verifikasi": total_verifikasi,
+                    "lolos": total_lolos,
+                    "tidak_lolos": total_tidak_lolos,
+                    "sk_sudah": total_sk_sudah,
+                    "sk_belum": total_sk_belum
+                }
+            })
+
+        if verfal_batches:
+            verfal_ids = [b['id'] for b in verfal_batches]
+            placeholders = ','.join(['?'] * len(verfal_ids))
+            cursor.execute(f"""
+                SELECT UPPER(TRIM(COALESCE(vr.kabupaten_kota, ''))) as kab,
+                       SUM(CASE WHEN vr.status = 'LOLOS' THEN 1 ELSE 0 END) as lolos,
+                       SUM(CASE WHEN vr.status = 'TIDAK LOLOS' THEN 1 ELSE 0 END) as tidak_lolos,
+                       SUM(CASE WHEN vr.status = 'LOLOS' AND sk.verified_record_id IS NOT NULL THEN 1 ELSE 0 END) as sk_sudah
+                FROM verified_records vr
+                LEFT JOIN (
+                    SELECT DISTINCT verified_record_id 
+                    FROM sk_dirjen_matches 
+                    WHERE verified_record_id IS NOT NULL
+                      AND (match_type = 'PERFECT' 
+                           OR (match_type = 'NEEDS_APPROVAL' AND override_status = 'APPROVED')
+                           OR match_type = 'MANUAL_PAIR')
+                ) sk ON sk.verified_record_id = vr.id
+                WHERE vr.batch_id IN ({placeholders}) AND TRIM(COALESCE(vr.kabupaten_kota, '')) != ''
+                GROUP BY kab
+            """, verfal_ids)
+            
+            stats_by_kab = {}
+            for row in cursor.fetchall():
+                lolos = row['lolos'] or 0
+                tidak_lolos = row['tidak_lolos'] or 0
+                sk_sudah = row['sk_sudah'] or 0
+                sk_belum = max(0, lolos - sk_sudah)
+                stats_by_kab[row['kab']] = {
+                    "lolos": lolos,
+                    "tidak_lolos": tidak_lolos,
+                    "verifikasi": lolos + tidak_lolos,
+                    "sk_sudah": sk_sudah,
+                    "sk_belum": sk_belum
+                }
+            
+            kab_data = {}
+            total_verifikasi = 0
+            total_lolos = 0
+            total_tidak_lolos = 0
+            total_sk_sudah = 0
+            total_sk_belum = 0
+            for kab in all_kabupaten:
+                stats = stats_by_kab.get(kab, {"lolos": 0, "tidak_lolos": 0, "verifikasi": 0, "sk_sudah": 0, "sk_belum": 0})
+                kab_data[kab] = {
+                    "verifikasi": stats["verifikasi"],
+                    "lolos": stats["lolos"],
+                    "tidak_lolos": stats["tidak_lolos"],
+                    "sk_sudah": stats["sk_sudah"],
+                    "sk_belum": stats["sk_belum"]
+                }
+                total_verifikasi += stats["verifikasi"]
+                total_lolos += stats["lolos"]
+                total_tidak_lolos += stats["tidak_lolos"]
+                total_sk_sudah += stats["sk_sudah"]
+                total_sk_belum += stats["sk_belum"]
+                
+            batches_data.append({
+                "batch_id": f"verfal_{stage_id}",
+                "batch_name": "VERFAL",
+                "nomor_ba": "Gabungan",
+                "tanggal_ba": "—",
                 "data": kab_data,
                 "totals": {
                     "verifikasi": total_verifikasi,
@@ -6118,99 +6384,107 @@ def get_rekap_batch_verfal(published_only: int = 1, province_id: int = 1):
         stage_name = stage['name']
         
         cursor.execute(f"""
-            SELECT id, name, is_published, nomor_ba, tanggal_ba, sort_order, kabupaten 
+            SELECT COUNT(*) as cnt 
             FROM verified_batches 
             WHERE stage_id = ? AND batch_type = 'VERFAL' {stage_batch_filter}
-            ORDER BY sort_order ASC, uploaded_at ASC, id ASC
         """, (stage_id,))
-        batches = [dict(r) for r in cursor.fetchall()]
+        has_verfal_batch = cursor.fetchone()['cnt'] > 0
         
-        if not batches:
+        cursor.execute("""
+            SELECT COUNT(*) as cnt
+            FROM invers_records ir
+            JOIN invers_revisions irv ON ir.revision_id = irv.id
+            WHERE irv.stage_id = ? AND irv.is_active = 1
+        """, (stage_id,))
+        has_invers_data = cursor.fetchone()['cnt'] > 0
+        
+        if not has_verfal_batch and not has_invers_data:
             continue
             
-        batches_data = []
-        for batch in batches:
-            batch_id = batch['id']
-            batch_name = batch['name']
-            
-            cursor.execute("""
-                SELECT UPPER(TRIM(COALESCE(vr.kabupaten_kota, ''))) as kab,
-                       SUM(CASE WHEN vr.status = 'LOLOS' THEN 1 ELSE 0 END) as lolos,
-                       SUM(CASE WHEN vr.status = 'TIDAK LOLOS' THEN 1 ELSE 0 END) as tidak_lolos,
-                       SUM(CASE WHEN vr.status = 'LOLOS' AND sk.verified_record_id IS NOT NULL THEN 1 ELSE 0 END) as sk_sudah
-                FROM verified_records vr
-                LEFT JOIN (
-                    SELECT DISTINCT verified_record_id 
-                    FROM sk_dirjen_matches 
-                    WHERE verified_record_id IS NOT NULL
-                      AND (match_type = 'PERFECT' 
-                           OR (match_type = 'NEEDS_APPROVAL' AND override_status = 'APPROVED')
-                           OR match_type = 'MANUAL_PAIR')
-                ) sk ON sk.verified_record_id = vr.id
-                WHERE vr.batch_id = ? AND TRIM(COALESCE(vr.kabupaten_kota, '')) != ''
-                GROUP BY kab
-            """, (batch_id,))
-            
-            stats_by_kab = {}
-            for row in cursor.fetchall():
-                lolos = row['lolos']
-                tidak_lolos = row['tidak_lolos']
-                sk_sudah = row['sk_sudah']
-                sk_belum = max(0, lolos - sk_sudah)
-                stats_by_kab[row['kab']] = {
-                    "lolos": lolos,
-                    "tidak_lolos": tidak_lolos,
-                    "verifikasi": lolos + tidak_lolos,
-                    "sk_sudah": sk_sudah,
-                    "sk_belum": sk_belum
-                }
-            
-            kab_data = []
-            total_verifikasi = 0
-            total_lolos = 0
-            total_tidak_lolos = 0
-            total_sk_sudah = 0
-            total_sk_belum = 0
-            
-            for kab in all_kabupaten:
-                stats = stats_by_kab.get(kab, {"lolos": 0, "tidak_lolos": 0, "verifikasi": 0, "sk_sudah": 0, "sk_belum": 0})
-                kab_data.append({
-                    "kabupaten": kab,
-                    "verifikasi": stats["verifikasi"],
-                    "lolos": stats["lolos"],
-                    "tidak_lolos": stats["tidak_lolos"],
-                    "sk_sudah": stats["sk_sudah"],
-                    "sk_belum": stats["sk_belum"]
-                })
-                total_verifikasi += stats["verifikasi"]
-                total_lolos += stats["lolos"]
-                total_tidak_lolos += stats["tidak_lolos"]
-                total_sk_sudah += stats["sk_sudah"]
-                total_sk_belum += stats["sk_belum"]
-                
-            batches_data.append({
-                "batch_id": batch_id,
-                "batch_name": batch_name,
-                "kabupaten": batch.get("kabupaten"),
-                "is_published": batch["is_published"],
-                "nomor_ba": batch.get("nomor_ba"),
-                "tanggal_ba": batch.get("tanggal_ba"),
-                "kabupaten_data": kab_data,
-                "totals": {
-                    "verifikasi": total_verifikasi,
-                    "lolos": total_lolos,
-                    "tidak_lolos": total_tidak_lolos,
-                    "sk_sudah": total_sk_sudah,
-                    "sk_belum": total_sk_belum
-                }
+        cursor.execute("""
+            SELECT UPPER(TRIM(COALESCE(ir.kabupaten_kota, ''))) as kab,
+                   COUNT(*) as alokasi
+            FROM invers_records ir
+            JOIN invers_revisions irv ON ir.revision_id = irv.id
+            WHERE irv.stage_id = ? AND irv.is_active = 1 AND TRIM(COALESCE(ir.kabupaten_kota, '')) != ''
+            GROUP BY kab
+        """, (stage_id,))
+        alokasi_by_kab = {row['kab']: row['alokasi'] for row in cursor.fetchall()}
+        
+        cursor.execute(f"""
+            SELECT UPPER(TRIM(COALESCE(vr.kabupaten_kota, ''))) as kab,
+                   SUM(CASE WHEN vr.status = 'LOLOS' THEN 1 ELSE 0 END) as lolos,
+                   SUM(CASE WHEN vr.status = 'TIDAK LOLOS' THEN 1 ELSE 0 END) as tidak_lolos,
+                   SUM(CASE WHEN vr.status = 'LOLOS' AND sk.verified_record_id IS NOT NULL THEN 1 ELSE 0 END) as sk_sudah
+            FROM verified_records vr
+            JOIN verified_batches vb ON vr.batch_id = vb.id
+            LEFT JOIN (
+                SELECT DISTINCT verified_record_id 
+                FROM sk_dirjen_matches 
+                WHERE verified_record_id IS NOT NULL
+                  AND (match_type = 'PERFECT' 
+                       OR (match_type = 'NEEDS_APPROVAL' AND override_status = 'APPROVED')
+                       OR match_type = 'MANUAL_PAIR')
+            ) sk ON sk.verified_record_id = vr.id
+            WHERE vb.stage_id = ? AND vb.batch_type = 'VERFAL' {stage_batch_filter} AND TRIM(COALESCE(vr.kabupaten_kota, '')) != ''
+            GROUP BY kab
+        """, (stage_id,))
+        
+        stats_by_kab = {}
+        for row in cursor.fetchall():
+            lolos = row['lolos'] or 0
+            tidak_lolos = row['tidak_lolos'] or 0
+            sk_sudah = row['sk_sudah'] or 0
+            sk_belum = max(0, lolos - sk_sudah)
+            stats_by_kab[row['kab']] = {
+                "lolos": lolos,
+                "tidak_lolos": tidak_lolos,
+                "verifikasi": lolos + tidak_lolos,
+                "sk_sudah": sk_sudah,
+                "sk_belum": sk_belum
+            }
+        
+        kab_data = []
+        total_alokasi = 0
+        total_verifikasi = 0
+        total_lolos = 0
+        total_tidak_lolos = 0
+        total_sk_sudah = 0
+        total_sk_belum = 0
+        
+        for kab in all_kabupaten:
+            alo = alokasi_by_kab.get(kab, 0)
+            stats = stats_by_kab.get(kab, {"lolos": 0, "tidak_lolos": 0, "verifikasi": 0, "sk_sudah": 0, "sk_belum": 0})
+            kab_data.append({
+                "kabupaten": kab,
+                "alokasi": alo,
+                "verifikasi": stats["verifikasi"],
+                "lolos": stats["lolos"],
+                "tidak_lolos": stats["tidak_lolos"],
+                "sk_sudah": stats["sk_sudah"],
+                "sk_belum": stats["sk_belum"]
             })
+            total_alokasi += alo
+            total_verifikasi += stats["verifikasi"]
+            total_lolos += stats["lolos"]
+            total_tidak_lolos += stats["tidak_lolos"]
+            total_sk_sudah += stats["sk_sudah"]
+            total_sk_belum += stats["sk_belum"]
             
         stage_type = "pengganti" if "pengganti" in stage_name.lower() else "murni"
         stages_data.append({
             "stage_id": stage_id,
             "stage_name": stage_name,
             "stage_type": stage_type,
-            "batches": batches_data
+            "kabupaten_data": kab_data,
+            "totals": {
+                "alokasi": total_alokasi,
+                "verifikasi": total_verifikasi,
+                "lolos": total_lolos,
+                "tidak_lolos": total_tidak_lolos,
+                "sk_sudah": total_sk_sudah,
+                "sk_belum": total_sk_belum
+            }
         })
         
     conn.close()
@@ -6220,12 +6494,19 @@ def get_rekap_batch_verfal(published_only: int = 1, province_id: int = 1):
     }
 
 @app.get("/api/rekap-batch-verfal/export")
-def export_rekap_batch_verfal(published_only: int = 1):
+def export_rekap_batch_verfal(published_only: int = 1, province_id: int = 1):
     import re
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT id, name FROM invers_stages ORDER BY id ASC")
+    if not province_id or province_id == 1:
+        prov_stage_sql = "WHERE (s.province_id = 1 OR s.province_id IS NULL OR s.province_id = 0)"
+        prov_stage_params = ()
+    else:
+        prov_stage_sql = "WHERE s.province_id = ?"
+        prov_stage_params = (province_id,)
+
+    cursor.execute(f"SELECT s.id, s.name FROM invers_stages s {prov_stage_sql} ORDER BY s.id ASC", prov_stage_params)
     all_stages = [dict(r) for r in cursor.fetchall()]
     def get_stage_num(s):
         match = re.search(r'\d+', s['name'])
@@ -6234,19 +6515,21 @@ def export_rekap_batch_verfal(published_only: int = 1):
     
     published_filter = "AND vb.is_published = 1" if published_only else ""
     cursor.execute(f"""
-        SELECT DISTINCT UPPER(TRIM(COALESCE(kabupaten_kota, ''))) as kab 
+        SELECT DISTINCT UPPER(TRIM(COALESCE(ir.kabupaten_kota, ''))) as kab 
         FROM invers_records ir
         JOIN invers_revisions irv ON ir.revision_id = irv.id
-        WHERE irv.is_active = 1 AND TRIM(COALESCE(kabupaten_kota, '')) != ''
+        JOIN invers_stages s ON irv.stage_id = s.id
+        {prov_stage_sql} AND irv.is_active = 1 AND TRIM(COALESCE(ir.kabupaten_kota, '')) != ''
         UNION
         SELECT DISTINCT UPPER(TRIM(COALESCE(vr.kabupaten_kota, ''))) as kab
         FROM verified_records vr
         JOIN verified_batches vb ON vr.batch_id = vb.id
+        JOIN invers_stages s ON vb.stage_id = s.id
         LEFT JOIN reconciliation_overrides ro ON ro.original_no_ktp = vr.no_ktp AND ro.stage_id = vb.stage_id
-        WHERE vb.batch_type = 'VERFAL' AND (vr.is_duplicate_in_previous = 0 OR ro.id IS NOT NULL) AND TRIM(COALESCE(vr.kabupaten_kota, '')) != ''
+        {prov_stage_sql} AND vb.batch_type = 'VERFAL' AND (vr.is_duplicate_in_previous = 0 OR ro.id IS NOT NULL) AND TRIM(COALESCE(vr.kabupaten_kota, '')) != ''
         {published_filter}
         ORDER BY kab ASC
-    """)
+    """, (*prov_stage_params, *prov_stage_params))
     all_kabupaten = [r['kab'] for r in cursor.fetchall()]
     
     stage_batch_filter = "AND is_published = 1" if published_only else ""
@@ -6257,91 +6540,106 @@ def export_rekap_batch_verfal(published_only: int = 1):
         stage_name = stage['name']
         
         cursor.execute(f"""
-            SELECT id, name, nomor_ba, tanggal_ba, kabupaten 
+            SELECT COUNT(*) as cnt 
             FROM verified_batches 
             WHERE stage_id = ? AND batch_type = 'VERFAL' {stage_batch_filter}
-            ORDER BY sort_order ASC, uploaded_at ASC, id ASC
         """, (stage_id,))
-        batches = [dict(r) for r in cursor.fetchall()]
+        has_verfal_batch = cursor.fetchone()['cnt'] > 0
         
-        if not batches:
+        cursor.execute("""
+            SELECT COUNT(*) as cnt
+            FROM invers_records ir
+            JOIN invers_revisions irv ON ir.revision_id = irv.id
+            WHERE irv.stage_id = ? AND irv.is_active = 1
+        """, (stage_id,))
+        has_invers_data = cursor.fetchone()['cnt'] > 0
+        
+        if not has_verfal_batch and not has_invers_data:
             continue
             
-        batches_data = []
-        for batch in batches:
-            batch_id = batch['id']
-            batch_name = batch['name']
-            
-            cursor.execute("""
-                SELECT UPPER(TRIM(COALESCE(vr.kabupaten_kota, ''))) as kab,
-                       SUM(CASE WHEN vr.status = 'LOLOS' THEN 1 ELSE 0 END) as lolos,
-                       SUM(CASE WHEN vr.status = 'TIDAK LOLOS' THEN 1 ELSE 0 END) as tidak_lolos,
-                       SUM(CASE WHEN vr.status = 'LOLOS' AND sk.verified_record_id IS NOT NULL THEN 1 ELSE 0 END) as sk_sudah
-                FROM verified_records vr
-                LEFT JOIN (
-                    SELECT DISTINCT verified_record_id 
-                    FROM sk_dirjen_matches 
-                    WHERE verified_record_id IS NOT NULL
-                      AND (match_type = 'PERFECT' 
-                           OR (match_type = 'NEEDS_APPROVAL' AND override_status = 'APPROVED')
-                           OR match_type = 'MANUAL_PAIR')
-                ) sk ON sk.verified_record_id = vr.id
-                WHERE vr.batch_id = ? AND TRIM(COALESCE(vr.kabupaten_kota, '')) != ''
-                GROUP BY kab
-            """, (batch_id,))
-            
-            stats_by_kab = {}
-            for row in cursor.fetchall():
-                lolos = row['lolos']
-                tidak_lolos = row['tidak_lolos']
-                sk_sudah = row['sk_sudah']
-                sk_belum = max(0, lolos - sk_sudah)
-                stats_by_kab[row['kab']] = {
-                    "lolos": lolos,
-                    "tidak_lolos": tidak_lolos,
-                    "verifikasi": lolos + tidak_lolos,
-                    "sk_sudah": sk_sudah,
-                    "sk_belum": sk_belum
-                }
-            
-            kab_data = {}
-            total_verifikasi = 0
-            total_lolos = 0
-            total_tidak_lolos = 0
-            total_sk_sudah = 0
-            total_sk_belum = 0
-            
-            for kab in all_kabupaten:
-                stats = stats_by_kab.get(kab, {"lolos": 0, "tidak_lolos": 0, "verifikasi": 0, "sk_sudah": 0, "sk_belum": 0})
-                kab_data[kab] = stats
-                total_verifikasi += stats["verifikasi"]
-                total_lolos += stats["lolos"]
-                total_tidak_lolos += stats["tidak_lolos"]
-                total_sk_sudah += stats["sk_sudah"]
-                total_sk_belum += stats["sk_belum"]
-                
-            batches_data.append({
-                "batch_id": batch_id,
-                "batch_name": batch_name,
-                "kabupaten": batch.get("kabupaten"),
-                "nomor_ba": batch.get("nomor_ba"),
-                "tanggal_ba": batch.get("tanggal_ba"),
-                "kabupaten_data": kab_data,
-                "totals": {
-                    "verifikasi": total_verifikasi,
-                    "lolos": total_lolos,
-                    "tidak_lolos": total_tidak_lolos,
-                    "sk_sudah": total_sk_sudah,
-                    "sk_belum": total_sk_belum
-                }
-            })
+        cursor.execute("""
+            SELECT UPPER(TRIM(COALESCE(ir.kabupaten_kota, ''))) as kab,
+                   COUNT(*) as alokasi
+            FROM invers_records ir
+            JOIN invers_revisions irv ON ir.revision_id = irv.id
+            WHERE irv.stage_id = ? AND irv.is_active = 1 AND TRIM(COALESCE(ir.kabupaten_kota, '')) != ''
+            GROUP BY kab
+        """, (stage_id,))
+        alokasi_by_kab = {row['kab']: row['alokasi'] for row in cursor.fetchall()}
+        
+        cursor.execute(f"""
+            SELECT UPPER(TRIM(COALESCE(vr.kabupaten_kota, ''))) as kab,
+                   SUM(CASE WHEN vr.status = 'LOLOS' THEN 1 ELSE 0 END) as lolos,
+                   SUM(CASE WHEN vr.status = 'TIDAK LOLOS' THEN 1 ELSE 0 END) as tidak_lolos,
+                   SUM(CASE WHEN vr.status = 'LOLOS' AND sk.verified_record_id IS NOT NULL THEN 1 ELSE 0 END) as sk_sudah
+            FROM verified_records vr
+            JOIN verified_batches vb ON vr.batch_id = vb.id
+            LEFT JOIN (
+                SELECT DISTINCT verified_record_id 
+                FROM sk_dirjen_matches 
+                WHERE verified_record_id IS NOT NULL
+                  AND (match_type = 'PERFECT' 
+                       OR (match_type = 'NEEDS_APPROVAL' AND override_status = 'APPROVED')
+                       OR match_type = 'MANUAL_PAIR')
+            ) sk ON sk.verified_record_id = vr.id
+            WHERE vb.stage_id = ? AND vb.batch_type = 'VERFAL' {stage_batch_filter} AND TRIM(COALESCE(vr.kabupaten_kota, '')) != ''
+            GROUP BY kab
+        """, (stage_id,))
+        
+        stats_by_kab = {}
+        for row in cursor.fetchall():
+            lolos = row['lolos'] or 0
+            tidak_lolos = row['tidak_lolos'] or 0
+            sk_sudah = row['sk_sudah'] or 0
+            sk_belum = max(0, lolos - sk_sudah)
+            stats_by_kab[row['kab']] = {
+                "lolos": lolos,
+                "tidak_lolos": tidak_lolos,
+                "verifikasi": lolos + tidak_lolos,
+                "sk_sudah": sk_sudah,
+                "sk_belum": sk_belum
+            }
+        
+        kab_data = {}
+        total_alokasi = 0
+        total_verifikasi = 0
+        total_lolos = 0
+        total_tidak_lolos = 0
+        total_sk_sudah = 0
+        total_sk_belum = 0
+        
+        for kab in all_kabupaten:
+            alo = alokasi_by_kab.get(kab, 0)
+            stats = stats_by_kab.get(kab, {"lolos": 0, "tidak_lolos": 0, "verifikasi": 0, "sk_sudah": 0, "sk_belum": 0})
+            kab_data[kab] = {
+                "alokasi": alo,
+                "verifikasi": stats["verifikasi"],
+                "lolos": stats["lolos"],
+                "tidak_lolos": stats["tidak_lolos"],
+                "sk_sudah": stats["sk_sudah"],
+                "sk_belum": stats["sk_belum"]
+            }
+            total_alokasi += alo
+            total_verifikasi += stats["verifikasi"]
+            total_lolos += stats["lolos"]
+            total_tidak_lolos += stats["tidak_lolos"]
+            total_sk_sudah += stats["sk_sudah"]
+            total_sk_belum += stats["sk_belum"]
             
         stage_type = "pengganti" if "pengganti" in stage_name.lower() else "murni"
         stages_data.append({
             "stage_id": stage_id,
             "stage_name": stage_name,
             "stage_type": stage_type,
-            "batches": batches_data
+            "data": kab_data,
+            "totals": {
+                "alokasi": total_alokasi,
+                "verifikasi": total_verifikasi,
+                "lolos": total_lolos,
+                "tidak_lolos": total_tidak_lolos,
+                "sk_sudah": total_sk_sudah,
+                "sk_belum": total_sk_belum
+            }
         })
         
     conn.close()
@@ -6351,7 +6649,6 @@ def export_rekap_batch_verfal(published_only: int = 1):
     font_main_title = Font(name='Arial', size=14, bold=True, color='1E293B')
     font_sub_title = Font(name='Arial', size=10, italic=True, color='64748B')
     font_stage_header = Font(name='Arial', size=11, bold=True, color='FFFFFF')
-    font_batch_header = Font(name='Arial', size=10, bold=True, color='1E293B')
     font_sub_header = Font(name='Arial', size=9, bold=True, color='475569')
     font_sub_header_sk_sudah = Font(name='Arial', size=9, bold=True, color='047857')
     font_sub_header_sk_belum = Font(name='Arial', size=9, bold=True, color='B45309')
@@ -6362,8 +6659,8 @@ def export_rekap_batch_verfal(published_only: int = 1):
     font_sk_sudah_cell = Font(name='Arial', size=9, color='047857', bold=True)
     font_sk_belum_cell = Font(name='Arial', size=9, color='B45309', bold=True)
     
-    fill_stage = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
-    fill_batch = PatternFill(start_color="E2E8F0", end_color="E2E8F0", fill_type="solid")
+    fill_stage = PatternFill(start_color="0D9488", end_color="0D9488", fill_type="solid")
+    fill_sub_alo = PatternFill(start_color="E2E8F0", end_color="E2E8F0", fill_type="solid")
     fill_sub_v = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
     fill_sub_l = PatternFill(start_color="DCFCE7", end_color="DCFCE7", fill_type="solid")
     fill_sub_tl = PatternFill(start_color="FEE2E2", end_color="FEE2E2", fill_type="solid")
@@ -6397,11 +6694,11 @@ def export_rekap_batch_verfal(published_only: int = 1):
     ws = wb.active
     ws.title = "Rekap BA Verfal"
     
-    ws['A1'] = "REKAPITULASI BATCH BERITA ACARA VERIFIKASI FAKTUAL (VERFAL)"
+    ws['A1'] = "REKAPITULASI BERITA ACARA VERIFIKASI FAKTUAL (VERFAL)"
     ws['A1'].font = font_main_title
     ws['A1'].alignment = align_title
     
-    ws['A2'] = "Sistem Verifikasi Perumahan Swadaya — Laporan per Batch Verfal"
+    ws['A2'] = "Sistem Verifikasi Perumahan Swadaya — Matriks Verfal per Tahap"
     ws['A2'].font = font_sub_title
     ws['A2'].alignment = align_title
     
@@ -6409,22 +6706,18 @@ def export_rekap_batch_verfal(published_only: int = 1):
     ws.cell(row=4, column=1).alignment = align_center
     ws.cell(row=4, column=1).fill = fill_stage
     ws.cell(row=4, column=1).border = border_thin
-    ws.merge_cells('A4:A6')
+    ws.merge_cells('A4:A5')
     
     ws.cell(row=4, column=2, value="KABUPATEN / KOTA").font = font_stage_header
     ws.cell(row=4, column=2).alignment = align_center
     ws.cell(row=4, column=2).fill = fill_stage
     ws.cell(row=4, column=2).border = border_thin
-    ws.merge_cells('B4:B6')
+    ws.merge_cells('B4:B5')
     
     col_idx = 3
     for stage in stages_data:
-        stage_batches = stage['batches']
-        if not stage_batches:
-            continue
-        num_cols = len(stage_batches) * 5
         start_col = col_idx
-        end_col = col_idx + num_cols - 1
+        end_col = col_idx + 5
         
         cell_stage = ws.cell(row=4, column=start_col, value=stage['stage_name'].upper())
         cell_stage.font = font_stage_header
@@ -6434,52 +6727,31 @@ def export_rekap_batch_verfal(published_only: int = 1):
         for c in range(start_col, end_col + 1):
             ws.cell(row=4, column=c).border = border_thin
             ws.cell(row=4, column=c).fill = fill_stage
-        if num_cols > 1:
-            ws.merge_cells(start_row=4, start_column=start_col, end_row=4, end_column=end_col)
+        ws.merge_cells(start_row=4, start_column=start_col, end_row=4, end_column=end_col)
+        
+        c_alo = ws.cell(row=5, column=col_idx, value="ALOKASI")
+        c_v = ws.cell(row=5, column=col_idx + 1, value="VERIFIKASI")
+        c_l = ws.cell(row=5, column=col_idx + 2, value="LOLOS")
+        c_tl = ws.cell(row=5, column=col_idx + 3, value="TIDAK LOLOS")
+        c_sks = ws.cell(row=5, column=col_idx + 4, value="SUDAH SK")
+        c_skb = ws.cell(row=5, column=col_idx + 5, value="BELUM SK")
+        
+        for c_sub, f_sub, fill_s in [
+            (c_alo, font_sub_header, fill_sub_alo),
+            (c_v, font_sub_header, fill_sub_v), 
+            (c_l, font_sub_header, fill_sub_l), 
+            (c_tl, font_sub_header, fill_sub_tl),
+            (c_sks, font_sub_header_sk_sudah, fill_sub_sk_sudah),
+            (c_skb, font_sub_header_sk_belum, fill_sub_sk_belum)
+        ]:
+            c_sub.font = f_sub
+            c_sub.alignment = align_center
+            c_sub.fill = fill_s
+            c_sub.border = border_thin
             
-        for batch in stage_batches:
-            b_start = col_idx
-            b_end = col_idx + 4
-            
-            b_label = batch['batch_name']
-            if batch.get('kabupaten'):
-                b_label = f"{b_label} ({batch['kabupaten']})"
-            if batch.get('nomor_ba'):
-                b_label += f"\nNo: {batch['nomor_ba']}"
-            if batch.get('tanggal_ba'):
-                b_label += f"\nTgl: {batch['tanggal_ba']}"
-                
-            cell_batch = ws.cell(row=5, column=b_start, value=b_label)
-            cell_batch.font = font_batch_header
-            cell_batch.alignment = align_center
-            cell_batch.fill = fill_batch
-            
-            for c in range(b_start, b_end + 1):
-                ws.cell(row=5, column=c).border = border_thin
-                ws.cell(row=5, column=c).fill = fill_batch
-            ws.merge_cells(start_row=5, start_column=b_start, end_row=5, end_column=b_end)
-            
-            c_v = ws.cell(row=6, column=b_start, value="VERIFIKASI")
-            c_l = ws.cell(row=6, column=b_start + 1, value="LOLOS")
-            c_tl = ws.cell(row=6, column=b_start + 2, value="TIDAK LOLOS")
-            c_sks = ws.cell(row=6, column=b_start + 3, value="SUDAH SK")
-            c_skb = ws.cell(row=6, column=b_start + 4, value="BELUM SK")
-            
-            for c_sub, f_sub, fill_s in [
-                (c_v, font_sub_header, fill_sub_v), 
-                (c_l, font_sub_header, fill_sub_l), 
-                (c_tl, font_sub_header, fill_sub_tl),
-                (c_sks, font_sub_header_sk_sudah, fill_sub_sk_sudah),
-                (c_skb, font_sub_header_sk_belum, fill_sub_sk_belum)
-            ]:
-                c_sub.font = f_sub
-                c_sub.alignment = align_center
-                c_sub.fill = fill_s
-                c_sub.border = border_thin
-                
-            col_idx += 5
-            
-    row_idx = 7
+        col_idx += 6
+        
+    row_idx = 6
     for k_idx, kab in enumerate(all_kabupaten, 1):
         is_even = (k_idx % 2 == 0)
         row_fill = fill_row_even if is_even else PatternFill(fill_type=None)
@@ -6498,41 +6770,44 @@ def export_rekap_batch_verfal(published_only: int = 1):
         
         c_idx = 3
         for stage in stages_data:
-            for batch in stage['batches']:
-                stats = batch['kabupaten_data'].get(kab, {"verifikasi": 0, "lolos": 0, "tidak_lolos": 0, "sk_sudah": 0, "sk_belum": 0})
-                val_v = stats['verifikasi']
-                val_l = stats['lolos']
-                val_tl = stats['tidak_lolos']
-                val_sks = stats['sk_sudah']
-                val_skb = stats['sk_belum']
+            stats = stage['data'].get(kab, {"alokasi": 0, "verifikasi": 0, "lolos": 0, "tidak_lolos": 0, "sk_sudah": 0, "sk_belum": 0})
+            val_alo = stats['alokasi']
+            val_v = stats['verifikasi']
+            val_l = stats['lolos']
+            val_tl = stats['tidak_lolos']
+            val_sks = stats['sk_sudah']
+            val_skb = stats['sk_belum']
+            
+            cell_alo = ws.cell(row=row_idx, column=c_idx, value=val_alo if val_alo > 0 else "-")
+            cell_v = ws.cell(row=row_idx, column=c_idx + 1, value=val_v if val_v > 0 else "-")
+            cell_l = ws.cell(row=row_idx, column=c_idx + 2, value=val_l if val_l > 0 else "-")
+            cell_tl = ws.cell(row=row_idx, column=c_idx + 3, value=val_tl if val_tl > 0 else "-")
+            cell_sks = ws.cell(row=row_idx, column=c_idx + 4, value=val_sks if val_sks > 0 else "-")
+            cell_skb = ws.cell(row=row_idx, column=c_idx + 5, value=val_skb if val_skb > 0 else "-")
+            
+            for cell in (cell_alo, cell_v, cell_l, cell_tl, cell_sks, cell_skb):
+                cell.alignment = align_center
+                if is_even: cell.fill = row_fill
                 
-                cell_v = ws.cell(row=row_idx, column=c_idx, value=val_v if val_v > 0 else "-")
-                cell_l = ws.cell(row=row_idx, column=c_idx + 1, value=val_l if val_l > 0 else "-")
-                cell_tl = ws.cell(row=row_idx, column=c_idx + 2, value=val_tl if val_tl > 0 else "-")
-                cell_sks = ws.cell(row=row_idx, column=c_idx + 3, value=val_sks if val_sks > 0 else "-")
-                cell_skb = ws.cell(row=row_idx, column=c_idx + 4, value=val_skb if val_skb > 0 else "-")
+            cell_alo.font = font_total if val_alo > 0 else font_data
+            cell_v.font = font_data
+            cell_l.font = font_lolos_cell if val_l > 0 else font_data
+            cell_tl.font = font_tidak_lolos_cell if val_tl > 0 else font_data
+            cell_sks.font = font_sk_sudah_cell if val_sks > 0 else font_data
+            cell_skb.font = font_sk_belum_cell if val_skb > 0 else font_data
+            
+            if val_l > 0: cell_l.fill = fill_lolos_cell
+            if val_tl > 0: cell_tl.fill = fill_tidak_lolos_cell
+            if val_sks > 0: cell_sks.fill = fill_sk_sudah_cell
+            if val_skb > 0: cell_skb.fill = fill_sk_belum_cell
                 
-                for cell in (cell_v, cell_l, cell_tl, cell_sks, cell_skb):
-                    cell.alignment = align_center
-                    if is_even: cell.fill = row_fill
-                    
-                cell_v.font = font_data
-                cell_l.font = font_lolos_cell if val_l > 0 else font_data
-                cell_tl.font = font_tidak_lolos_cell if val_tl > 0 else font_data
-                cell_sks.font = font_sk_sudah_cell if val_sks > 0 else font_data
-                cell_skb.font = font_sk_belum_cell if val_skb > 0 else font_data
-                
-                if val_l > 0: cell_l.fill = fill_lolos_cell
-                if val_tl > 0: cell_tl.fill = fill_tidak_lolos_cell
-                if val_sks > 0: cell_sks.fill = fill_sk_sudah_cell
-                if val_skb > 0: cell_skb.fill = fill_sk_belum_cell
-                    
-                cell_v.border = border_thin
-                cell_l.border = border_thin
-                cell_tl.border = border_thin
-                cell_sks.border = border_thin
-                cell_skb.border = border_thin
-                c_idx += 5
+            cell_alo.border = border_thin
+            cell_v.border = border_thin
+            cell_l.border = border_thin
+            cell_tl.border = border_thin
+            cell_sks.border = border_thin
+            cell_skb.border = border_thin
+            c_idx += 6
         row_idx += 1
         
     cell_tot_label = ws.cell(row=row_idx, column=2, value="TOTAL")
@@ -6547,39 +6822,22 @@ def export_rekap_batch_verfal(published_only: int = 1):
     
     c_idx = 3
     for stage in stages_data:
-        for batch in stage['batches']:
-            t = batch['totals']
-            cell_tot_v = ws.cell(row=row_idx, column=c_idx, value=t['verifikasi'])
-            cell_tot_l = ws.cell(row=row_idx, column=c_idx + 1, value=t['lolos'])
-            cell_tot_tl = ws.cell(row=row_idx, column=c_idx + 2, value=t['tidak_lolos'])
-            cell_tot_sks = ws.cell(row=row_idx, column=c_idx + 3, value=t['sk_sudah'])
-            cell_tot_skb = ws.cell(row=row_idx, column=c_idx + 4, value=t['sk_belum'])
+        t = stage['totals']
+        cell_tot_alo = ws.cell(row=row_idx, column=c_idx, value=t['alokasi'])
+        cell_tot_v = ws.cell(row=row_idx, column=c_idx + 1, value=t['verifikasi'])
+        cell_tot_l = ws.cell(row=row_idx, column=c_idx + 2, value=t['lolos'])
+        cell_tot_tl = ws.cell(row=row_idx, column=c_idx + 3, value=t['tidak_lolos'])
+        cell_tot_sks = ws.cell(row=row_idx, column=c_idx + 4, value=t['sk_sudah'])
+        cell_tot_skb = ws.cell(row=row_idx, column=c_idx + 5, value=t['sk_belum'])
+        
+        for cell_t in (cell_tot_alo, cell_tot_v, cell_tot_l, cell_tot_tl, cell_tot_sks, cell_tot_skb):
+            cell_t.font = font_total
+            cell_t.alignment = align_center
+            cell_t.fill = fill_total_row
+            cell_t.border = border_double_top
             
-            cell_tot_v.font = font_total
-            cell_tot_l.font = font_total
-            cell_tot_tl.font = font_total
-            cell_tot_sks.font = font_total
-            cell_tot_skb.font = font_total
-            
-            cell_tot_v.alignment = align_center
-            cell_tot_l.alignment = align_center
-            cell_tot_tl.alignment = align_center
-            cell_tot_sks.alignment = align_center
-            cell_tot_skb.alignment = align_center
-            
-            cell_tot_v.fill = fill_total_row
-            cell_tot_l.fill = fill_total_row
-            cell_tot_tl.fill = fill_total_row
-            cell_tot_sks.fill = fill_total_row
-            cell_tot_skb.fill = fill_total_row
-            
-            cell_tot_v.border = border_double_top
-            cell_tot_l.border = border_double_top
-            cell_tot_tl.border = border_double_top
-            cell_tot_sks.border = border_double_top
-            cell_tot_skb.border = border_double_top
-            c_idx += 5
-            
+        c_idx += 6
+        
     for col in ws.columns:
         col_idx = col[0].column
         col_letter = get_column_letter(col_idx)
@@ -6589,13 +6847,13 @@ def export_rekap_batch_verfal(published_only: int = 1):
             ws.column_dimensions[col_letter].width = 28
         else:
             ws.column_dimensions[col_letter].width = 14
-    ws.freeze_panes = 'C7'
+    ws.freeze_panes = 'C6'
     
     file_stream = io.BytesIO()
     wb.save(file_stream)
     file_stream.seek(0)
     
-    filename = "REKAP_BATCH_VERFAL.xlsx"
+    filename = "REKAP_VERFAL_PER_TAHAP.xlsx"
     return StreamingResponse(
         file_stream,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

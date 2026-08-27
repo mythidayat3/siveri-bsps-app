@@ -396,6 +396,30 @@ def init_db():
         cursor.execute("ALTER TABLE invers_stages ADD COLUMN province_id INTEGER DEFAULT 1")
     
     cursor.execute("UPDATE invers_stages SET province_id = 1 WHERE province_id IS NULL OR province_id = 0")
+
+    # Migration: add surat_filename, surat_data, surat_uploaded_at to invers_stages
+    try:
+        cursor.execute("SELECT surat_filename FROM invers_stages LIMIT 1")
+    except Exception:
+        try:
+            cursor.execute("ALTER TABLE invers_stages ADD COLUMN surat_filename TEXT")
+        except Exception:
+            pass
+    try:
+        cursor.execute("SELECT surat_data FROM invers_stages LIMIT 1")
+    except Exception:
+        try:
+            cursor.execute("ALTER TABLE invers_stages ADD COLUMN surat_data TEXT")
+        except Exception:
+            pass
+    try:
+        cursor.execute("SELECT surat_uploaded_at FROM invers_stages LIMIT 1")
+    except Exception:
+        try:
+            cursor.execute("ALTER TABLE invers_stages ADD COLUMN surat_uploaded_at TIMESTAMP")
+        except Exception:
+            pass
+
     conn.commit()
     
     # 2. INVERS Revisions
