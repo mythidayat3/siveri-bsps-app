@@ -1851,7 +1851,11 @@ function App() {
       const res = await fetch(`${BACKEND_URL}/api/verified/batch/${batchId}/delete`, {
         method: 'POST'
       });
-      if (!res.ok) throw new Error("Gagal menghapus data");
+      if (!res.ok) {
+        let msg = "Gagal menghapus data";
+        try { const d = await res.json(); msg = d.detail || msg; } catch { msg = (await res.text()) || msg; }
+        throw new Error(msg);
+      }
       const data = await res.json();
       showToast(data.message || "Berita Acara berhasil dihapus");
       fetchStageData(selectedStageId);

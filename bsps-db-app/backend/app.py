@@ -1554,34 +1554,70 @@ def delete_verified_batch(batch_id: int):
     cursor = conn.cursor()
     try:
         # Ambil info batch
-        cursor.execute("SELECT stage_id FROM verified_batches WHERE id = ?", (batch_id,))
+        cursor.execute("SELECT id, stage_id, name FROM verified_batches WHERE id = ?", (batch_id,))
         batch = cursor.fetchone()
         if not batch:
             raise HTTPException(status_code=404, detail="Batch tidak ditemukan")
         
         stage_id = batch['stage_id']
-        
-        # Ambil semua NIK dari batch ini SEBELUM dihapus
-        cursor.execute("SELECT DISTINCT no_ktp FROM verified_records WHERE batch_id = ?", (batch_id,))
-        niks_in_batch = [row['no_ktp'] for row in cursor.fetchall()]
-        
-        # Hapus reconciliation overrides untuk NIK-NIK tersebut
-        deleted_overrides = 0
-        for nik in niks_in_batch:
-            cursor.execute("DELETE FROM reconciliation_overrides WHERE stage_id = ? AND original_no_ktp = ?", (stage_id, nik))
-            deleted_overrides += cursor.rowcount
-        
-        # Hapus batch (ON DELETE CASCADE akan menghapus verified_records dan replacement_events)
+        batch_name = batch['name'] or f"Batch {batch_id}"
+
+        # 1. Hapus relasi dependent secara eksplisit (instan & aman untuk PostgreSQL & SQLite)
+        cursor.execute("""
+            DELETE FROM replacement_events 
+            WHERE disqualified_record_id IN (SELECT id FROM verified_records WHERE batch_id = ?)
+        """, (batch_id,))
+
+        cursor.execute("""
+            DELETE FROM invers_manual_pairs 
+            WHERE verified_record_id IN (SELECT id FROM verified_records WHERE batch_id = ?)
+        """, (batch_id,))
+
+        cursor.execute("""
+            DELETE FROM sk_dirjen_matches 
+            WHERE verified_record_id IN (SELECT id FROM verified_records WHERE batch_id = ?)
+        """, (batch_id,))
+
+        # 2. Hapus reconciliation_overrides dalam 1 single subquery instan
+        cursor.execute("""
+            DELETE FROM reconciliation_overrides 
+            WHERE stage_id = ? 
+              AND original_no_ktp IN (SELECT no_ktp FROM verified_records WHERE batch_id = ?)
+        """, (stage_id, batch_id,))
+
+        # 3. Hapus verified_records
+        cursor.execute("DELETE FROM verified_records WHERE batch_id = ?", (batch_id,))
+
+        # 4. Hapus verified_batches
         cursor.execute("DELETE FROM verified_batches WHERE id = ?", (batch_id,))
+
+        log_activity(
+            username="Admin",
+            action="DELETE_BATCH",
+            entity_type="VERIFIKASI",
+            entity_name=batch_name,
+            details=f"Menghapus Berita Acara '{batch_name}' (ID: {batch_id})",
+            db_conn=conn
+        )
+
         conn.commit()
+        REKAP_CACHE.clear()
     except HTTPException:
-        conn.close()
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         raise
     except Exception as e:
-        conn.close()
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         raise HTTPException(status_code=500, detail=f"Gagal menghapus batch: {str(e)}")
-    conn.close()
-    return {"message": f"Berita Acara {batch_id} berhasil dihapus. {deleted_overrides} hasil rekonsiliasi terkait ikut terhapus."}
+    finally:
+        conn.close()
+
+    return {"message": f"Berita Acara '{batch_name}' berhasil dihapus beserta data verifikasi terkait"}
 
 @app.post("/api/verified/batch/{batch_id}/toggle-published")
 def toggle_batch_published(batch_id: int):
@@ -2333,21 +2369,68 @@ def delete_stage(stage_id: int):
             raise HTTPException(status_code=404, detail="Tahap tidak ditemukan")
         
         stage_name = stage['name']
-        
-        # Hapus stage (ON DELETE CASCADE akan menghapus semua data terkait):
-        # - invers_revisions -> invers_records
-        # - verified_batches -> verified_records -> replacement_events
-        # - reconciliation_overrides
-        # - invers_manual_pairs
+
+        # Hapus relasi dependent secara eksplisit agar aman di PostgreSQL/Supabase & SQLite
+        cursor.execute("""
+            DELETE FROM replacement_events 
+            WHERE disqualified_record_id IN (
+                SELECT vr.id FROM verified_records vr 
+                JOIN verified_batches vb ON vr.batch_id = vb.id 
+                WHERE vb.stage_id = ?
+            )
+        """, (stage_id,))
+
+        cursor.execute("""
+            DELETE FROM invers_manual_pairs 
+            WHERE stage_id = ? OR verified_record_id IN (
+                SELECT vr.id FROM verified_records vr 
+                JOIN verified_batches vb ON vr.batch_id = vb.id 
+                WHERE vb.stage_id = ?
+            )
+        """, (stage_id, stage_id))
+
+        cursor.execute("""
+            DELETE FROM sk_dirjen_matches 
+            WHERE verified_record_id IN (
+                SELECT vr.id FROM verified_records vr 
+                JOIN verified_batches vb ON vr.batch_id = vb.id 
+                WHERE vb.stage_id = ?
+            )
+        """, (stage_id,))
+
+        cursor.execute("DELETE FROM reconciliation_overrides WHERE stage_id = ?", (stage_id,))
+        cursor.execute("DELETE FROM verified_records WHERE batch_id IN (SELECT id FROM verified_batches WHERE stage_id = ?)", (stage_id,))
+        cursor.execute("DELETE FROM verified_batches WHERE stage_id = ?", (stage_id,))
+        cursor.execute("DELETE FROM invers_records WHERE revision_id IN (SELECT id FROM invers_revisions WHERE stage_id = ?)", (stage_id,))
+        cursor.execute("DELETE FROM invers_revisions WHERE stage_id = ?", (stage_id,))
         cursor.execute("DELETE FROM invers_stages WHERE id = ?", (stage_id,))
+
+        log_activity(
+            username="Admin",
+            action="DELETE_STAGE",
+            entity_type="STAGE",
+            entity_name=stage_name,
+            details=f"Menghapus Tahap '{stage_name}' (ID: {stage_id}) beserta seluruh data terkait",
+            db_conn=conn
+        )
+
         conn.commit()
+        REKAP_CACHE.clear()
     except HTTPException:
-        conn.close()
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         raise
     except Exception as e:
-        conn.close()
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         raise HTTPException(status_code=500, detail=f"Gagal menghapus tahap: {str(e)}")
-    conn.close()
+    finally:
+        conn.close()
+
     return {"message": f"Tahap '{stage_name}' berhasil dihapus beserta semua data terkait"}
 
 @app.post("/api/stage/{stage_id}/rename")
