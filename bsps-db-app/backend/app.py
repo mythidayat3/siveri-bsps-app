@@ -1921,8 +1921,9 @@ def save_reconciliation_override(
         clean_corr_kk = corrected_no_kk.strip() if corrected_no_kk else None
         if clean_corr_kk and clean_corr_kk.endswith('.0'): clean_corr_kk = clean_corr_kk[:-2]
 
+        cursor.execute("DELETE FROM reconciliation_overrides WHERE stage_id = ? AND original_no_ktp = ?", (stage_id, orig_nik))
         cursor.execute("""
-            INSERT OR REPLACE INTO reconciliation_overrides (
+            INSERT INTO reconciliation_overrides (
                 stage_id, original_no_ktp, override_type, corrected_nama, corrected_no_ktp, corrected_no_kk
             ) VALUES (?, ?, ?, ?, ?, ?)
         """, (stage_id, orig_nik, override_type, clean_corr_nama, clean_corr_nik, clean_corr_kk))
@@ -4332,12 +4333,13 @@ async def bulk_reconciliation_override(
         
         count = 0
         for nik in nik_list:
+            cursor.execute("DELETE FROM reconciliation_overrides WHERE stage_id = ? AND original_no_ktp = ?", (stage_id, nik))
             cursor.execute("""
-                INSERT OR REPLACE INTO reconciliation_overrides (
+                INSERT INTO reconciliation_overrides (
                     stage_id, original_no_ktp, override_type, corrected_nama, corrected_no_ktp, corrected_no_kk
                 ) VALUES (?, ?, ?, NULL, NULL, NULL)
             """, (stage_id, nik, override_type))
-            count += cursor.rowcount
+            count += 1
         
         conn.commit()
     except HTTPException:
@@ -4703,8 +4705,9 @@ async def pair_invers_with_verified(
         raise HTTPException(status_code=404, detail="Verified record tidak ditemukan")
 
     try:
+        cursor.execute("DELETE FROM invers_manual_pairs WHERE stage_id = ? AND invers_nik = ?", (stage_id, invers_nik.strip()))
         cursor.execute("""
-            INSERT OR REPLACE INTO invers_manual_pairs
+            INSERT INTO invers_manual_pairs
                 (stage_id, invers_nik, invers_nama, invers_kabupaten, verified_record_id)
             VALUES (?, ?, ?, ?, ?)
         """, (stage_id, invers_nik.strip(), invers_nama, invers_kabupaten, verified_record_id))
@@ -4773,8 +4776,9 @@ def auto_pair_by_nik(stage_id: int):
         vr = verified_map.get(nik) or verified_by_kk.get(nik)
         if vr:
             try:
+                cursor.execute("DELETE FROM invers_manual_pairs WHERE stage_id = ? AND invers_nik = ?", (stage_id, nik))
                 cursor.execute("""
-                    INSERT OR REPLACE INTO invers_manual_pairs
+                    INSERT INTO invers_manual_pairs
                         (stage_id, invers_nik, invers_nama, invers_kabupaten, verified_record_id)
                     VALUES (?, ?, ?, ?, ?)
                 """, (stage_id, nik, ir['nama'], ir['kabupaten_kota'], vr['id']))
@@ -4879,8 +4883,9 @@ def batch_pair(body: dict = Body(...)):
             errors.append(f"Data tidak lengkap: {invers_nik}")
             continue
         try:
+            cursor.execute("DELETE FROM invers_manual_pairs WHERE stage_id = ? AND invers_nik = ?", (stage_id, invers_nik))
             cursor.execute("""
-                INSERT OR REPLACE INTO invers_manual_pairs
+                INSERT INTO invers_manual_pairs
                     (stage_id, invers_nik, invers_nama, invers_kabupaten, verified_record_id)
                 VALUES (?, ?, ?, ?, ?)
             """, (stage_id, invers_nik, invers_nama, invers_kabupaten, verified_record_id))

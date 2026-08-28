@@ -2236,7 +2236,11 @@ function App() {
         method: 'POST',
         body: formData
       });
-      if (!res.ok) throw new Error("Gagal menyimpan data perbaikan");
+      if (!res.ok) {
+        let msg = "Gagal menyimpan data perbaikan";
+        try { const d = await res.json(); msg = d.detail || msg; } catch { msg = (await res.text()) || msg; }
+        throw new Error(msg);
+      }
       showToast("Perbaikan rekonsiliasi berhasil diterapkan");
       setEditingRecord(null);
       fetchStageData(selectedStageId);
@@ -2259,7 +2263,11 @@ function App() {
         method: 'POST',
         body: formData
       });
-      if (!res.ok) throw new Error("Gagal memasangkan data");
+      if (!res.ok) {
+        let msg = "Gagal memasangkan data";
+        try { const d = await res.json(); msg = d.detail || msg; } catch { msg = (await res.text()) || msg; }
+        throw new Error(msg);
+      }
       showToast("Berhasil memasangkan data dengan INVERS!");
       setShowLinkModal(false);
       setLinkingRecord(null);
@@ -2274,11 +2282,15 @@ function App() {
       return;
     }
     try {
-      const res = await fetch(`${BACKEND_URL}/api/verified/record/${recordId}/delete`, {
-        method: 'POST'
+      const res = await fetch(`${BACKEND_URL}/api/verified-record/${recordId}`, {
+        method: 'DELETE'
       });
-      if (!res.ok) throw new Error("Gagal menghapus data lapangan");
-      showToast("Data lapangan berhasil dihapus dari database!");
+      if (!res.ok) {
+        let msg = "Gagal menghapus data lapangan";
+        try { const d = await res.json(); msg = d.detail || msg; } catch { msg = (await res.text()) || msg; }
+        throw new Error(msg);
+      }
+      showToast(`Data lapangan '${name}' berhasil dihapus`);
       fetchStageData(selectedStageId);
     } catch (err) {
       showToast(err.message, 'error');

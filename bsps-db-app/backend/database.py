@@ -46,11 +46,13 @@ def translate_sqlite_to_pg(sql):
         i += 1
     sql_t = "".join(parts)
     
-    # 3. Handle INSERT OR IGNORE
+    # 3. Handle INSERT OR IGNORE / INSERT OR REPLACE
     if re.search(r'\bINSERT\s+OR\s+IGNORE\s+INTO\b', sql_t, flags=re.IGNORECASE):
         sql_t = re.sub(r'\bINSERT\s+OR\s+IGNORE\s+INTO\b', 'INSERT INTO', sql_t, flags=re.IGNORECASE)
         if not re.search(r'\bON\s+CONFLICT\b', sql_t, flags=re.IGNORECASE):
             sql_t = sql_t.rstrip().rstrip(';') + " ON CONFLICT DO NOTHING;"
+    elif re.search(r'\bINSERT\s+OR\s+REPLACE\s+INTO\b', sql_t, flags=re.IGNORECASE):
+        sql_t = re.sub(r'\bINSERT\s+OR\s+REPLACE\s+INTO\b', 'INSERT INTO', sql_t, flags=re.IGNORECASE)
 
     # 4. Handle PRAGMA (ignore)
     if sql_t.strip().upper().startswith("PRAGMA"):
